@@ -1,0 +1,17 @@
+{
+  "recommendations": [
+    "ms-vscode.cpptools",
+    "ms-vscode.cpptools-extension-pack",
+    "ms-vscode.cmake-tools",
+    "twxs.cmake",
+    "matepek.vscode-catch2-test-adapter",
+    "ryanluker.vscode-coverage-gutters",
+    "jeff-hykin.better-cpp-syntax",
+    "cschlosser.doxdocgen",
+    "streetsidesoftware.code-spell-checker",
+    "streetsidesoftware.code-spell-checker-spanish",
+    "vadimcn.vscode-lldb",
+    "ms-vscode.makefile-tools",
+    "formulahendry.code-runner"
+  ]
+}
