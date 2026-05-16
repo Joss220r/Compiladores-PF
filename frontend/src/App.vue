@@ -37,7 +37,9 @@ async function submitQuery() {
       query: query.value
     })
   } catch (error) {
-    const details = error.cause?.errors?.join(' ') || error.message
+    const details = Array.isArray(error.cause?.errors)
+      ? error.cause.errors.join(' ')
+      : error.message
     errorMessage.value = details
   } finally {
     loading.value = false
