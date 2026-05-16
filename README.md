@@ -27,39 +27,6 @@ Este proyecto implementa un **compilador SQL completo** desarrollado con metodol
 - ✅ **Suite de Tests**: Cobertura completa con Google Test
 - ✅ **Documentación Educativa**: Comentarios explicativos en cada fase
 
-## 📋 Prerrequisitos
-
-### 🐧 Linux (Ubuntu/Debian)
-```bash
-# Actualizar repositorios
-sudo apt update
-
-# Compilador C++17
-sudo apt install build-essential g++ cmake
-
-# Google Test Framework
-sudo apt install libgtest-dev
-
-# Herramientas adicionales
-sudo apt install git make valgrind gdb
-
-# Para análisis de cobertura (opcional)
-sudo apt install lcov gcovr
-```
-
-### 🍎 macOS
-```bash
-# Instalar Homebrew si no lo tienes
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Herramientas de desarrollo
-brew install cmake
-brew install googletest
-brew install lcov  # Opcional para cobertura
-
-# Xcode Command Line Tools (si no están instaladas)
-xcode-select --install
-```
 
 ### 🪟 Windows 11
 
@@ -84,13 +51,7 @@ xcode-select --install
    pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-gtest make git
    ```
 
-## 🔧 Instalación
 
-### 1. Clonar el repositorio
-```bash
-git clone https://github.com/compilations-teams/compilador-sql-final.git
-cd compilador-sql-final
-```
 
 ### 2. Compilar el proyecto
 ```bash
@@ -103,6 +64,71 @@ make compiler
 # Solo los tests
 make tests
 ```
+
+## Plataforma Java/Vue para validacion multi-motor
+
+Se agregaron modulos separados para iniciar la migracion/refactorizacion sin romper el compilador C++ existente:
+
+```text
+backend/   # Java + Spring Boot
+frontend/  # Vue.js + Vite
+render.yaml
+```
+
+La parte de Jose queda aislada en `backend` y `frontend`. Los modulos de Lexer, Parser y Analisis Semantico no se modifican directamente; el backend expone interfaces en `backend/src/main/java/com/compiladores/sqlplatform/service/compiler` para conectar esas implementaciones cuando esten listas.
+
+### Backend
+
+```bash
+cd backend
+mvn spring-boot:run
+```
+
+Endpoint principal:
+
+```http
+POST http://localhost:8080/api/validate
+```
+
+Body:
+
+```json
+{
+  "engine": "SQL",
+  "query": "SELECT * FROM usuarios WHERE edad > 18;"
+}
+```
+
+Respuesta estandar:
+
+```json
+{
+  "valid": true,
+  "engine": "SQL",
+  "message": "Query validada con mocks. Pendiente conectar Lexer, Parser y Semantico reales.",
+  "errors": [],
+  "tokens": [],
+  "ast": {},
+  "semanticResult": {}
+}
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+La app Vue corre en `http://localhost:5173` y usa `VITE_API_BASE_URL` para cambiar entre backend local y backend desplegado.
+
+### Render
+
+`render.yaml` define dos servicios:
+
+- `sql-platform-backend`: servicio Docker basado en `backend/Dockerfile`.
+- `sql-platform-frontend`: sitio estatico generado con `npm run build`.
 
 ### 3. Ejecutar tests
 ```bash
@@ -179,26 +205,7 @@ graph TD
     K --> F
 ```
 
-## 🛠️ Configuración VS Code
 
-### Extensiones Recomendadas
-
-#### Para todos los sistemas operativos:
-```json
-{
-  "recommendations": [
-    "ms-vscode.cpptools",
-    "ms-vscode.cmake-tools", 
-    "twxs.cmake",
-    "matepek.vscode-catch2-test-adapter",
-    "ryanluker.vscode-coverage-gutters",
-    "jeff-hykin.better-cpp-syntax",
-    "cschlosser.doxdocgen",
-    "streetsidesoftware.code-spell-checker",
-    "streetsidesoftware.code-spell-checker-spanish"
-  ]
-}
-```
 
 ### Configuración de tareas (`.vscode/tasks.json`)
 ```json
@@ -271,91 +278,3 @@ graph TD
 }
 ```
 
-## 📚 Material de Estudio
-
-### Conceptos Clave por Módulo
-
-#### 1. Análisis Léxico (`src/Lexer.cpp`)
-- **Tokens y Lexemas**: Identificación de unidades léxicas
-- **Expresiones Regulares**: Patrones para reconocimiento
-- **Autómatas Finitos**: DFA para procesamiento eficiente
-- **Buffer Management**: Técnicas de doble buffer
-
-#### 2. Análisis Sintáctico (`src/Parser.cpp`) 
-- **Gramática SQL**: BNF adaptada para SQL
-- **Parsing Descendente Recursivo**: Implementación clara y educativa
-- **Manejo de Precedencia**: Operadores y expresiones
-- **Recuperación de Errores**: Estrategias panic mode
-
-#### 3. Análisis Semántico (`src/SemanticAnalyzer.cpp`)
-- **Type Checking**: Validación de tipos en operaciones
-- **Scope Resolution**: Manejo de ámbitos y visibilidad
-- **Symbol Table**: Estructura eficiente con hash tables
-- **AST Decoration**: Anotación con información semántica
-
-## 🤝 Contribución
-
-Este repositorio está configurado para aprendizaje colaborativo:
-
-### Para Estudiantes
-1. **Fork** el repositorio (no clone directo)
-2. Crear **branch** con formato: `feature/nombre-apellido-funcionalidad`
-3. Implementar siguiendo **TDD**
-4. Crear **Pull Request** con descripción detallada
-5. Code review por compañeros antes de merge
-
-### Reglas de Contribución
-- ✅ Todos los PR deben incluir tests
-- ✅ Los tests deben pasar en CI/CD
-- ✅ Código debe seguir estilo Google C++
-- ✅ Documentar cambios significativos
-- ❌ NO hacer push directo a `main`
-- ❌ NO merge sin review de al menos 1 compañero
-
-## 📖 Recursos Adicionales
-
-### Libros Recomendados
-- "Compilers: Principles, Techniques, and Tools" - Aho, Lam, Sethi, Ullman (Dragon Book)
-- "Modern Compiler Implementation in C++" - Andrew W. Appel
-- "Engineering a Compiler" - Cooper & Torczon
-
-### Herramientas Complementarias
-- [ANTLR](https://www.antlr.org/) - Generador de parsers
-- [Flex/Bison](https://www.gnu.org/software/bison/) - Herramientas clásicas
-- [LLVM](https://llvm.org/) - Framework de compiladores moderno
-
-### Videos y Tutoriales
-- [Playlist Compiladores UMG](https://youtube.com/playlist/compiladores-umg)
-- [TDD en C++ con Google Test](https://youtube.com/tdd-cpp-gtest)
-
-## 📝 Licencia
-
-Este proyecto es software educativo bajo licencia MIT. Ver [LICENSE](LICENSE) para más detalles.
-
-## 👥 Equipo
-
-**Profesor**: Ing. Richard Ortiz
-**Asistentes de Cátedra**: Por asignar
-**Administrador del Repo**: @rortizs
-
----
-
-### ⚠️ Nota Importante para Estudiantes
-
-Este proyecto es una herramienta de **aprendizaje activo**. No copies código sin entender:
-
-1. **Estudia** cada componente antes de modificar
-2. **Experimenta** con los tests para entender el comportamiento
-3. **Pregunta** en Issues si algo no está claro
-4. **Colabora** ayudando a otros estudiantes
-
-> "El objetivo no es tener un compilador funcionando, sino **entender cómo funciona un compilador**" - Curso Compiladores 2026
-
-## 🆘 Soporte
-
-- **Issues**: [GitHub Issues](https://github.com/compilations-teams/compilador-sql-final/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/compilations-teams/compilador-sql-final/discussions)
-- **Email**: compiladores2026@umg.edu.gt
-
----
-*Última actualización: Marzo 2026*
