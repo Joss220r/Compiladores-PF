@@ -1,93 +1,118 @@
-# Compilador SQL - Proyecto Final
-## Curso de Compiladores - 7mo Semestre
+# SQL Platform Validator - Backend y Frontend
 
-[![C++](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/compilations-teams/compilador-sql-final)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-TDD-success.svg)](tests/)
+Documentacion del bloque de Jose: backend, frontend, API de validacion, mocks de integracion y preparacion para Render.
 
-## 📚 Descripción
+Este bloque no implementa directamente Lexer, Parser ni Analisis Semantico reales. Es la base de integracion para que esos modulos se conecten despues mediante interfaces.
 
-Este proyecto implementa un **compilador SQL completo** desarrollado con metodología **Test-Driven Development (TDD)**, diseñado específicamente para el aprendizaje de conceptos fundamentales de compiladores en el 7mo semestre de Ingeniería en Sistemas.
+## Objetivo
 
-### 🎯 Objetivos Didácticos
+Crear una plataforma web que permita escribir una query, seleccionar el motor/base de datos y enviarla a un backend Java para recibir una respuesta estandar de validacion.
 
-1. **Análisis Léxico**: Comprensión de tokens, lexemas, expresiones regulares y autómatas finitos
-2. **Análisis Sintáctico**: Dominio de gramáticas libres de contexto, árboles sintácticos y AST
-3. **Análisis Semántico**: Validación de tipos, ámbitos, y decoración del AST
-4. **Generación de Código**: Traducción a código intermedio y optimización
-5. **TDD**: Desarrollo dirigido por pruebas para garantizar calidad y comprensión
+Motores contemplados:
 
-## 🚀 Características
+- SQL generico
+- NoSQL
+- MongoDB
+- SQL Server
+- MySQL
+- PostgreSQL
+- Redis
 
-- ✅ **Soporte SQL Básico**: SELECT, INSERT, UPDATE, DELETE, CREATE TABLE, DROP TABLE
-- ✅ **Análisis Completo**: Léxico, Sintáctico y Semántico
-- ✅ **Tabla de Símbolos**: Gestión eficiente de identificadores y tipos
-- ✅ **Manejo de Errores**: Reportes detallados con línea y columna
-- ✅ **Suite de Tests**: Cobertura completa con Google Test
-- ✅ **Documentación Educativa**: Comentarios explicativos en cada fase
+## Alcance de este bloque
 
+Incluido:
 
-### 🪟 Windows 11
+- Backend Java con Spring Boot.
+- Frontend en Vue.js.
+- Endpoint `POST /api/validate`.
+- Servicio principal `QueryValidationService`.
+- DTOs y modelos de respuesta.
+- Interfaces para conectar Lexer, Parser y Semantico.
+- Mocks temporales para responder mientras los otros modulos no esten listos.
+- Manejo basico de errores en frontend.
+- Pruebas basicas del endpoint.
+- Configuracion inicial para Render.
+- Favicon y paleta visual del proyecto.
 
-#### Opción 1: WSL2 (Recomendado)
-1. Instalar WSL2:
-   ```powershell
-   # PowerShell como Administrador
-   wsl --install
-   ```
+No incluido en este bloque:
 
-2. Reiniciar y seguir instrucciones de Linux arriba
+- Lexer real.
+- Parser real.
+- Analisis semantico real.
+- Ejecucion real de queries contra una base de datos.
+- Administracion de ramas o acciones de Git.
 
-#### Opción 2: MSYS2/MinGW
-1. Descargar e instalar [MSYS2](https://www.msys2.org/)
-
-2. En terminal MSYS2:
-   ```bash
-   # Actualizar sistema
-   pacman -Syu
-   
-   # Instalar herramientas
-   pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-gtest make git
-   ```
-
-
-
-### 2. Compilar el proyecto
-```bash
-# Compilar todo (compilador + tests)
-make all
-
-# Solo el compilador
-make compiler
-
-# Solo los tests
-make tests
-```
-
-## Plataforma Java/Vue para validacion multi-motor
-
-Se agregaron modulos separados para iniciar la migracion/refactorizacion sin romper el compilador C++ existente:
+## Estructura
 
 ```text
-backend/   # Java + Spring Boot
-frontend/  # Vue.js + Vite
+backend/
+  Dockerfile
+  pom.xml
+  src/main/java/com/compiladores/sqlplatform/
+    controller/
+    dto/
+    model/
+    service/
+    service/compiler/
+  src/test/java/com/compiladores/sqlplatform/
+
+frontend/
+  index.html
+  package.json
+  public/favicon.png
+  src/
+    App.vue
+    assets/main.css
+    services/queryValidationApi.js
+
 render.yaml
 ```
 
-La parte de Jose queda aislada en `backend` y `frontend`. Los modulos de Lexer, Parser y Analisis Semantico no se modifican directamente; el backend expone interfaces en `backend/src/main/java/com/compiladores/sqlplatform/service/compiler` para conectar esas implementaciones cuando esten listas.
+## Backend
 
-### Backend
+Tecnologia:
 
-```bash
-cd backend
+- Java 17+
+- Spring Boot
+- Maven
+
+Ruta:
+
+```text
+backend/
+```
+
+### Ejecutar backend local
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\backend
 mvn spring-boot:run
 ```
 
-Endpoint principal:
+Si Maven no esta en el PATH, usar la ruta completa instalada en la maquina:
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\backend
+C:\Maven\apache-maven-3.9.15\bin\mvn.cmd spring-boot:run
+```
+
+El backend corre en:
+
+```text
+http://localhost:8080
+```
+
+Health check:
+
+```text
+GET http://localhost:8080/api/health
+```
+
+### Endpoint principal
 
 ```http
 POST http://localhost:8080/api/validate
+Content-Type: application/json
 ```
 
 Body:
@@ -99,7 +124,7 @@ Body:
 }
 ```
 
-Respuesta estandar:
+Respuesta esperada:
 
 ```json
 {
@@ -113,168 +138,211 @@ Respuesta estandar:
 }
 ```
 
+### Contratos de integracion
+
+Los otros modulos deben conectarse mediante estas interfaces:
+
+```text
+backend/src/main/java/com/compiladores/sqlplatform/service/compiler/LexerPort.java
+backend/src/main/java/com/compiladores/sqlplatform/service/compiler/ParserPort.java
+backend/src/main/java/com/compiladores/sqlplatform/service/compiler/SemanticAnalyzerPort.java
+```
+
+Implementaciones temporales actuales:
+
+```text
+MockLexerAdapter.java
+MockParserAdapter.java
+MockSemanticAnalyzerAdapter.java
+```
+
+Cuando los modulos reales esten listos, estos mocks se reemplazan o se desactivan.
+
+## Frontend
+
+Tecnologia:
+
+- Vue.js
+- Vite
+- JavaScript
+
+Ruta:
+
+```text
+frontend/
+```
+
+### Ejecutar frontend local
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+El frontend corre en:
+
+```text
+http://localhost:5173
+```
+
+La app permite:
+
+- Seleccionar motor/base de datos.
+- Escribir una query.
+- Enviar la query al backend.
+- Mostrar si la respuesta es valida o invalida.
+- Mostrar errores.
+- Mostrar tokens, AST y resultado semantico si el backend los devuelve.
+
+### Configurar URL del backend
+
+Archivo de ejemplo:
+
+```text
+frontend/.env.example
+```
+
+Variable:
+
+```text
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+Para Render, esta variable debe apuntar a la URL publica del backend.
+
+## Base de datos en Render
+
+Se creo una base PostgreSQL en Render para usarla despues como catalogo real del proyecto.
+
+Uso recomendado en esta fase:
+
+- Guardar tablas disponibles.
+- Guardar columnas disponibles.
+- Guardar tipos de datos.
+- Guardar logs de validacion.
+
+No se recomienda ejecutar directamente las querys escritas por el usuario contra la base de datos. Primero deben pasar por Lexer, Parser y Analisis Semantico.
+
+Variables sugeridas para backend:
+
+```text
+DATABASE_URL=jdbc:postgresql://HOST:5432/DATABASE
+DATABASE_USERNAME=USER
+DATABASE_PASSWORD=PASSWORD
+```
+
+No subir credenciales reales al repositorio.
+
+## Render
+
+El archivo `render.yaml` prepara dos servicios:
+
+- `sql-platform-backend`: backend Spring Boot usando Docker.
+- `sql-platform-frontend`: sitio estatico generado por Vite.
+
+Antes de desplegar, revisar:
+
+```text
+render.yaml
+backend/Dockerfile
+frontend/.env.example
+```
+
+## Pruebas
+
+### Backend
+
+Pruebas agregadas:
+
+```text
+backend/src/test/java/com/compiladores/sqlplatform/controller/QueryValidationControllerTest.java
+```
+
+Cubre:
+
+- `GET /api/health`
+- `POST /api/validate` con query valida
+- rechazo de query vacia
+- rechazo cuando falta `engine`
+
+Ejecutar:
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\backend
+mvn test
+```
+
+O con ruta completa:
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\backend
+C:\Maven\apache-maven-3.9.15\bin\mvn.cmd test
+```
+
 ### Frontend
 
-```bash
-cd frontend
-npm install
-npm run dev
+Compilar:
+
+```powershell
+cd C:\Proyectos\Compiladores-PF\frontend
+npm.cmd run build
 ```
 
-La app Vue corre en `http://localhost:5173` y usa `VITE_API_BASE_URL` para cambiar entre backend local y backend desplegado.
+## Flujo local recomendado
 
-### Render
+1. Levantar backend:
 
-`render.yaml` define dos servicios:
-
-- `sql-platform-backend`: servicio Docker basado en `backend/Dockerfile`.
-- `sql-platform-frontend`: sitio estatico generado con `npm run build`.
-
-### 3. Ejecutar tests
-```bash
-# Ejecutar suite completa
-make test
-
-# Con cobertura (si está instalado lcov)
-make coverage
+```powershell
+cd C:\Proyectos\Compiladores-PF\backend
+mvn spring-boot:run
 ```
 
-## 🎮 Uso
+2. Levantar frontend:
 
-### Compilar una consulta SQL
-```bash
-# Desde archivo
-./sql-compiler archivo.sql
-
-# Modo interactivo
-./sql-compiler
-SQL> SELECT * FROM usuarios WHERE edad > 18;
+```powershell
+cd C:\Proyectos\Compiladores-PF\frontend
+npm.cmd run dev
 ```
 
-### Ejemplos incluidos
-```bash
-# Probar ejemplos
-./sql-compiler examples/select_basic.sql
-./sql-compiler examples/create_table.sql
-./sql-compiler examples/complex_join.sql
+3. Abrir:
+
+```text
+http://localhost:5173
 ```
 
-## 🧪 Test-Driven Development
+4. Probar una query:
 
-Este proyecto sigue estrictamente TDD. Cada funcionalidad fue desarrollada siguiendo el ciclo:
-
-1. **🔴 Red**: Escribir test que falla
-2. **🟢 Green**: Implementar código mínimo para pasar
-3. **🔵 Refactor**: Mejorar código manteniendo tests verdes
-
-### Estructura de Tests
-```
-tests/
-├── lexer_test.cpp       # Tests del analizador léxico
-├── parser_test.cpp      # Tests del analizador sintáctico  
-├── semantic_test.cpp    # Tests del análisis semántico
-├── integration_test.cpp # Tests de integración completa
-└── fixtures/           # Archivos SQL de prueba
+```sql
+SELECT * FROM usuarios WHERE edad > 18;
 ```
 
-### Ejecutar test específico
-```bash
-# Solo tests del lexer
-./tests/lexer_test
+## Estado actual
 
-# Con verbosidad
-./tests/lexer_test --gtest_verbose
-```
+Funcional:
 
-## 📐 Arquitectura
+- Frontend Vue corre localmente.
+- Backend Spring Boot corre localmente.
+- Frontend se conecta al backend.
+- Backend responde con mocks.
+- Tests del backend pasan.
+- Build del frontend funciona.
+- Base PostgreSQL de Render creada para integracion posterior.
 
-```mermaid
-graph TD
-    A[Código SQL] --> B[Analizador Léxico]
-    B --> C[Stream de Tokens]
-    C --> D[Analizador Sintáctico]
-    D --> E[AST - Árbol Sintáctico]
-    E --> F[Analizador Semántico]
-    F --> G[AST Decorado]
-    G --> H[Generador de Código]
-    H --> I[Código Intermedio]
-    
-    J[Tabla de Símbolos] --> F
-    K[Gestor de Errores] --> B
-    K --> D
-    K --> F
-```
+Pendiente:
 
+- Conectar backend a PostgreSQL.
+- Crear servicio de catalogo real.
+- Integrar Lexer real.
+- Integrar Parser real.
+- Integrar Analisis Semantico real.
+- Desplegar backend y frontend en Render.
 
+## Responsabilidades futuras del equipo
 
-### Configuración de tareas (`.vscode/tasks.json`)
-```json
-{
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "Build Compiler",
-      "type": "shell",
-      "command": "make",
-      "args": ["compiler"],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
-    },
-    {
-      "label": "Run Tests",
-      "type": "shell",
-      "command": "make",
-      "args": ["test"],
-      "group": "test"
-    },
-    {
-      "label": "Clean Build",
-      "type": "shell",
-      "command": "make",
-      "args": ["clean"],
-      "group": "build"
-    }
-  ]
-}
-```
+- Andre: Lexer real.
+- Ademar: Parser real.
+- Hugo: Analisis semantico real.
+- Jose: Backend, frontend, DB, integracion y despliegue.
 
-### Configuración de debug (`.vscode/launch.json`)
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Debug Compiler",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/sql-compiler",
-      "args": ["examples/select_basic.sql"],
-      "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
-      "environment": [],
-      "externalConsole": false,
-      "MIMode": "gdb",
-      "setupCommands": [
-        {
-          "description": "Enable pretty-printing for gdb",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
-      ]
-    },
-    {
-      "name": "Debug Tests",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/tests/all_tests",
-      "args": [],
-      "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
-      "MIMode": "gdb"
-    }
-  ]
-}
-```
-
+Cada modulo debe integrarse respetando las interfaces existentes para evitar romper la demo web.
