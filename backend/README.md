@@ -11,7 +11,7 @@ Backend Java/Spring Boot para validar querys de distintos motores:
 - Redis
 
 ## Estructura
-
+  
 ```text
 backend/
   src/main/java/com/compiladores/sqlplatform/
