@@ -155,7 +155,29 @@ textarea:focus {
   background: #81638b;
 }
 
-.primary-button:disabled {
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+}
+
+.secondary-button {
+  height: 46px;
+  min-width: 110px;
+  border: 1px solid #b695c0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #503459;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: #dac9df;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
   cursor: wait;
   opacity: 0.72;
 }
@@ -246,5 +268,13 @@ pre {
   .status-pill,
   .result-badge {
     width: fit-content;
+  }
+
+  .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .secondary-button {
+    width: 100%;
   }
 }

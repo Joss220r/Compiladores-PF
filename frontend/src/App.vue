@@ -13,7 +13,7 @@ const engines = [
 ]
 
 const selectedEngine = ref('SQL')
-const query = ref('SELECT * FROM usuarios WHERE edad > 18;')
+const query = ref('')
 const result = ref(null)
 const errorMessage = ref('')
 const loading = ref(false)
@@ -45,6 +45,12 @@ async function submitQuery() {
     loading.value = false
   }
 }
+
+function clearForm() {
+  query.value = ''
+  result.value = null
+  errorMessage.value = ''
+}
 </script>
 
 <template>
@@ -69,12 +75,22 @@ async function submitQuery() {
 
           <label class="field">
             <span>Query</span>
-            <textarea v-model="query" rows="12" spellcheck="false" />
+            <textarea
+              v-model="query"
+              rows="12"
+              spellcheck="false"
+              placeholder="Escribe aqui la query que quieres validar"
+            />
           </label>
 
-          <button class="primary-button" type="submit" :disabled="loading">
-            {{ loading ? 'Validando...' : 'Validar query' }}
-          </button>
+          <div class="button-row">
+            <button class="primary-button" type="submit" :disabled="loading">
+              {{ loading ? 'Validando...' : 'Validar query' }}
+            </button>
+            <button class="secondary-button" type="button" :disabled="loading" @click="clearForm">
+              Limpiar
+            </button>
+          </div>
         </form>
       </div>
 
