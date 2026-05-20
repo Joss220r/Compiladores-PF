@@ -148,15 +148,15 @@ backend/src/main/java/com/compiladores/sqlplatform/service/compiler/ParserPort.j
 backend/src/main/java/com/compiladores/sqlplatform/service/compiler/SemanticAnalyzerPort.java
 ```
 
-Implementaciones temporales actuales:
+Implementaciones actuales:
 
 ```text
 MockLexerAdapter.java
 MockParserAdapter.java
-MockSemanticAnalyzerAdapter.java
+service/semantic/SemanticAnalyzerAdapter.java
 ```
 
-Cuando los modulos reales esten listos, estos mocks se reemplazan o se desactivan.
+Cuando el parser real este listo, `MockParserAdapter.java` se reemplaza o se desactiva.
 
 ## Frontend
 
