@@ -28,7 +28,7 @@ class QueryValidationControllerTest {
     }
 
     @Test
-    void validateQueryReturnsMockValidationResult() throws Exception {
+    void validateQueryReturnsBasicParserAst() throws Exception {
         String request = """
                 {
                   "engine": "SQL",
@@ -45,7 +45,9 @@ class QueryValidationControllerTest {
                 .andExpect(jsonPath("$.message", containsString("Query validada con mocks")))
                 .andExpect(jsonPath("$.errors", hasSize(0)))
                 .andExpect(jsonPath("$.tokens").isArray())
-                .andExpect(jsonPath("$.ast.type").value("MockQuery"))
+                .andExpect(jsonPath("$.ast.type").value("Query"))
+                .andExpect(jsonPath("$.ast.attributes.parserStatus").value("BASIC_SQL_PARSER"))
+                .andExpect(jsonPath("$.ast.children[0].type").value("SelectStatement"))
                 .andExpect(jsonPath("$.semanticResult.valid").value(true));
     }
 
