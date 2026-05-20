@@ -28,7 +28,7 @@ class QueryValidationControllerTest {
     }
 
     @Test
-    void validateQueryReturnsMockValidationResult() throws Exception {
+    void validateQueryReturnsSemanticValidationResult() throws Exception {
         String request = """
                 {
                   "engine": "SQL",
@@ -42,7 +42,7 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.valid").value(true))
                 .andExpect(jsonPath("$.engine").value("SQL"))
-                .andExpect(jsonPath("$.message", containsString("Query validada con mocks")))
+                .andExpect(jsonPath("$.message", containsString("Analisis Semantico")))
                 .andExpect(jsonPath("$.errors", hasSize(0)))
                 .andExpect(jsonPath("$.tokens").isArray())
                 .andExpect(jsonPath("$.ast.type").value("MockQuery"))
@@ -81,5 +81,77 @@ class QueryValidationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.valid").value(false))
                 .andExpect(jsonPath("$.errors[0]", containsString("engine")));
+    }
+
+    @Test
+    void validateQueryRejectsUnknownTable() throws Exception {
+        String request = """
+                {
+                  "engine": "POSTGRESQL",
+                  "query": "SELECT nombre FROM clientes;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false))
+                .andExpect(jsonPath("$.errors[0]", containsString("tabla 'clientes'")))
+                .andExpect(jsonPath("$.semanticResult.valid").value(false));
+    }
+
+    @Test
+    void validateQueryRejectsUnknownColumn() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT email FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false))
+                .andExpect(jsonPath("$.errors[0]", containsString("columna 'email'")))
+                .andExpect(jsonPath("$.semanticResult.valid").value(false));
+    }
+
+    @Test
+    void validateQueryRejectsUnsupportedOperationForEngine() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "SELECT nombre FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false))
+                .andExpect(jsonPath("$.errors[0]", containsString("no esta soportada")))
+                .andExpect(jsonPath("$.semanticResult.valid").value(false));
+    }
+
+    @Test
+    void validateQueryRejectsIncompatibleWhereTypes() throws Exception {
+        String request = """
+                {
+                  "engine": "POSTGRESQL",
+                  "query": "SELECT nombre FROM usuarios WHERE edad > 'hola';"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(false))
+                .andExpect(jsonPath("$.errors[0]", containsString("Tipos incompatibles")))
+                .andExpect(jsonPath("$.semanticResult.valid").value(false));
     }
 }
