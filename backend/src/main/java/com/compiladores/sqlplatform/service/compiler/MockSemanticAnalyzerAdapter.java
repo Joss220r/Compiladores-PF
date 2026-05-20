@@ -5,9 +5,8 @@ import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.SemanticResult;
 import java.util.List;
 import java.util.Map;
-import org.springframework.stereotype.Component;
 
-@Component
+@Deprecated
 public class MockSemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
     @Override
