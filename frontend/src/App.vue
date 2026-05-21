@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { validateQuery } from './services/queryValidationApi'
 
 const engines = [
@@ -17,6 +17,7 @@ const query = ref('')
 const result = ref(null)
 const errorMessage = ref('')
 const loading = ref(false)
+const theme = ref('light')
 
 const resultClass = computed(() => {
   if (!result.value) {
@@ -28,6 +29,18 @@ const resultClass = computed(() => {
 
 const groupedErrors = computed(() => groupIssues(result.value?.errors || []))
 const groupedWarnings = computed(() => groupIssues(result.value?.warnings || []))
+
+onMounted(() => {
+  const savedTheme = localStorage.getItem('sql-platform-theme')
+  if (savedTheme === 'dark' || savedTheme === 'light') {
+    theme.value = savedTheme
+  }
+})
+
+watch(theme, (value) => {
+  document.documentElement.dataset.theme = value
+  localStorage.setItem('sql-platform-theme', value)
+}, { immediate: true })
 
 function groupIssues(issues) {
   return issues.reduce((groups, issue) => {
@@ -71,6 +84,10 @@ function clearForm() {
   result.value = null
   errorMessage.value = ''
 }
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+}
 </script>
 
 <template>
@@ -81,6 +98,12 @@ function clearForm() {
           <div>
             <h1>Validador de querys</h1>
           </div>
+          <button class="theme-toggle" type="button" :aria-pressed="theme === 'dark'" @click="toggleTheme">
+            <span class="toggle-track">
+              <span class="toggle-thumb" />
+            </span>
+            <span>{{ theme === 'dark' ? 'Oscuro' : 'Claro' }}</span>
+          </button>
         </div>
 
         <form class="query-form" @submit.prevent="submitQuery">
