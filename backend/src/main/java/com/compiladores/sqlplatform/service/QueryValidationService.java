@@ -5,10 +5,10 @@ import com.compiladores.sqlplatform.dto.QueryValidationResponse;
 import com.compiladores.sqlplatform.model.AstNode;
 import com.compiladores.sqlplatform.model.SemanticResult;
 import com.compiladores.sqlplatform.model.TokenInfo;
+import com.compiladores.sqlplatform.model.ValidationIssue;
 import com.compiladores.sqlplatform.service.compiler.LexerPort;
 import com.compiladores.sqlplatform.service.compiler.ParserPort;
 import com.compiladores.sqlplatform.service.compiler.SemanticAnalyzerPort;
-import com.compiladores.sqlplatform.service.semantic.SemanticSymbols;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -19,31 +19,42 @@ public class QueryValidationService {
     private final LexerPort lexer;
     private final ParserPort parser;
     private final SemanticAnalyzerPort semanticAnalyzer;
+    private final DialectValidationService dialectValidationService;
 
     public QueryValidationService(
             LexerPort lexer,
             ParserPort parser,
-            SemanticAnalyzerPort semanticAnalyzer
+            SemanticAnalyzerPort semanticAnalyzer,
+            DialectValidationService dialectValidationService
     ) {
         this.lexer = lexer;
         this.parser = parser;
         this.semanticAnalyzer = semanticAnalyzer;
+        this.dialectValidationService = dialectValidationService;
     }
 
     public QueryValidationResponse validate(QueryValidationRequest request) {
-        List<String> errors = new ArrayList<>();
+        List<ValidationIssue> issues = new ArrayList<>();
         String normalizedQuery = request.getQuery().trim();
 
         List<TokenInfo> tokens = lexer.tokenize(normalizedQuery, request.getEngine());
+        issues.addAll(lexer.getIssues());
+        issues.addAll(dialectValidationService.validate(normalizedQuery, request.getEngine()));
         AstNode ast = parser.parse(tokens, normalizedQuery, request.getEngine());
-        errors.addAll(extractParserErrors(ast));
+        issues.addAll(parser.getIssues());
         SemanticResult semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
-        errors.addAll(extractSemanticErrors(semanticResult));
+        issues.addAll(semanticAnalyzer.getIssues());
 
         if (normalizedQuery.isBlank()) {
-            errors.add("La query no puede estar vacia.");
+            issues.add(ValidationIssue.error("PARSER", "La query no puede estar vacia.", 1, 1, ""));
         }
 
+        List<ValidationIssue> errors = issues.stream()
+                .filter(issue -> "ERROR".equals(issue.getSeverity()))
+                .toList();
+        List<ValidationIssue> warnings = issues.stream()
+                .filter(issue -> "WARNING".equals(issue.getSeverity()))
+                .toList();
         boolean valid = errors.isEmpty() && semanticResult.isValid();
         String message = valid
                 ? "Query validada por Lexer, Parser y Analisis Semantico."
@@ -54,41 +65,11 @@ public class QueryValidationService {
                 request.getEngine(),
                 message,
                 errors,
+                warnings,
                 tokens,
                 ast,
-                semanticResult
+                semanticResult,
+                null
         );
-    }
-
-    private List<String> extractParserErrors(AstNode ast) {
-        if (ast == null || ast.getAttributes() == null) {
-            return List.of();
-        }
-
-        Object parserErrors = ast.getAttributes().get("errors");
-        if (parserErrors instanceof List<?> errors) {
-            return errors.stream()
-                    .filter(String.class::isInstance)
-                    .map(String.class::cast)
-                    .toList();
-        }
-
-        return List.of();
-    }
-
-    private List<String> extractSemanticErrors(SemanticResult semanticResult) {
-        if (semanticResult.getSymbols() == null) {
-            return List.of();
-        }
-
-        Object semanticErrors = semanticResult.getSymbols().get(SemanticSymbols.ERRORS);
-        if (semanticErrors instanceof List<?> errors) {
-            return errors.stream()
-                    .filter(String.class::isInstance)
-                    .map(String.class::cast)
-                    .toList();
-        }
-
-        return List.of();
     }
 }

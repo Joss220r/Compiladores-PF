@@ -3,9 +3,11 @@ package com.compiladores.sqlplatform.service.semantic;
 import com.compiladores.sqlplatform.model.AstNode;
 import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.SemanticResult;
+import com.compiladores.sqlplatform.model.ValidationIssue;
 import com.compiladores.sqlplatform.service.compiler.SemanticAnalyzerPort;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -25,6 +27,21 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
     private static final Pattern WHERE_PATTERN = Pattern.compile(
             "(?is).*\\bWHERE\\s+(?<left>[a-zA-Z_][\\w]*)\\s*(?<op>=|!=|<>|>=|<=|>|<)\\s*(?<right>[^;]+).*"
     );
+    private static final Pattern INSERT_PATTERN = Pattern.compile(
+            "(?is)^\\s*INSERT\\s+INTO\\s+(?<table>[a-zA-Z_][\\w]*)\\s*(\\((?<columns>[^)]*)\\))?\\s+VALUES\\s*\\((?<values>.*)\\)\\s*;?\\s*$"
+    );
+    private static final Pattern UPDATE_PATTERN = Pattern.compile(
+            "(?is)^\\s*UPDATE\\s+(?<table>[a-zA-Z_][\\w]*)\\s+SET\\s+(?<assignments>.*?)(\\s+WHERE\\s+(?<where>.*))?;?\\s*$"
+    );
+    private static final Pattern DELETE_PATTERN = Pattern.compile(
+            "(?is)^\\s*DELETE\\s+FROM\\s+(?<table>[a-zA-Z_][\\w]*)(\\s+WHERE\\s+(?<where>.*))?;?\\s*$"
+    );
+    private static final Pattern CREATE_TABLE_PATTERN = Pattern.compile(
+            "(?is)^\\s*CREATE\\s+TABLE\\s+(?<table>[a-zA-Z_][\\w]*)\\s*\\((?<columns>.*)\\)\\s*;?\\s*$"
+    );
+    private static final Pattern DROP_TABLE_PATTERN = Pattern.compile(
+            "(?is)^\\s*DROP\\s+TABLE\\s+(?<table>[a-zA-Z_][\\w]*)\\s*;?\\s*$"
+    );
     private static final Set<DatabaseEngine> RELATIONAL_ENGINES = Set.of(
             DatabaseEngine.SQL,
             DatabaseEngine.POSTGRESQL,
@@ -33,6 +50,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
     );
 
     private final CatalogService catalogService;
+    private final ThreadLocal<List<ValidationIssue>> issues = ThreadLocal.withInitial(List::of);
 
     public SemanticAnalyzerAdapter(CatalogService catalogService) {
         this.catalogService = catalogService;
@@ -46,6 +64,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         if (ast == null) {
             errors.add("No se recibio AST para el analisis semantico.");
+            setIssues(errors, warnings);
             return result(errors, warnings, symbols);
         }
 
@@ -56,6 +75,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         if (query.operation().isEmpty()) {
             warnings.add("No se pudo identificar la operacion principal desde el AST actual.");
+            setIssues(errors, warnings);
             return result(errors, warnings, symbols);
         }
 
@@ -64,12 +84,28 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         if ("SELECT".equals(query.operation().get())) {
             validateSelect(query, engine, errors, warnings, symbols);
+        } else if ("INSERT".equals(query.operation().get())) {
+            validateInsert(query.rawQuery(), errors, warnings, symbols);
+        } else if ("UPDATE".equals(query.operation().get())) {
+            validateUpdate(query.rawQuery(), errors, warnings, symbols);
+        } else if ("DELETE".equals(query.operation().get())) {
+            validateDelete(query.rawQuery(), errors, warnings, symbols);
+        } else if ("CREATE".equals(query.operation().get())) {
+            validateCreateTable(query.rawQuery(), engine, errors, warnings, symbols);
+        } else if ("DROP".equals(query.operation().get())) {
+            validateDropTable(query.rawQuery(), warnings, symbols);
         } else {
             warnings.add("La validacion semantica detallada de " + query.operation().get()
                     + " todavia no esta implementada.");
         }
 
+        setIssues(errors, warnings);
         return result(errors, warnings, symbols);
+    }
+
+    @Override
+    public List<ValidationIssue> getIssues() {
+        return issues.get();
     }
 
     private void validateEngineSupport(String operation, DatabaseEngine engine, List<String> errors) {
@@ -134,6 +170,126 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         query.where().ifPresent(where -> validateWhere(where, table.get(), tableName, errors, symbols));
     }
 
+    private void validateInsert(String query, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
+        Matcher insert = INSERT_PATTERN.matcher(query);
+        if (!insert.matches()) {
+            errors.add("INSERT no cumple la forma INSERT INTO tabla (columnas) VALUES (valores).");
+            return;
+        }
+
+        List<String> columns = parseList(insert.group("columns"));
+        List<String> values = parseList(insert.group("values"));
+        symbols.put("insertColumns", columns);
+        symbols.put("insertValues", values);
+
+        if (!columns.isEmpty() && columns.size() != values.size()) {
+            errors.add("INSERT tiene " + columns.size() + " columna(s) pero " + values.size() + " valor(es).");
+        }
+        if (values.stream().anyMatch(String::isBlank)) {
+            errors.add("INSERT contiene valores vacios.");
+        }
+        addDuplicateErrors(columns, "INSERT contiene columna repetida: ", errors);
+        if (columns.isEmpty()) {
+            warnings.add("INSERT no especifica columnas; se validara segun el orden fisico de la tabla.");
+        }
+    }
+
+    private void validateUpdate(String query, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
+        Matcher update = UPDATE_PATTERN.matcher(query);
+        if (!update.matches()) {
+            errors.add("UPDATE no cumple la forma UPDATE tabla SET campo = valor.");
+            return;
+        }
+
+        String assignmentsText = update.group("assignments");
+        List<String> assignments = parseList(assignmentsText);
+        symbols.put("assignments", assignments);
+
+        if (assignments.isEmpty()) {
+            errors.add("SET no puede estar vacio.");
+        }
+
+        List<String> assignedColumns = new ArrayList<>();
+        for (String assignment : assignments) {
+            String[] parts = assignment.split("=", 2);
+            if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+                errors.add("Asignacion incompleta en UPDATE: " + assignment + ".");
+            } else {
+                assignedColumns.add(parts[0].trim());
+            }
+        }
+        addDuplicateErrors(assignedColumns, "UPDATE contiene campo repetido en SET: ", errors);
+
+        if (update.group("where") == null || update.group("where").isBlank()) {
+            warnings.add("UPDATE sin WHERE puede afectar multiples registros.");
+        }
+    }
+
+    private void validateDelete(String query, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
+        Matcher delete = DELETE_PATTERN.matcher(query);
+        if (!delete.matches()) {
+            errors.add("DELETE debe usar la forma DELETE FROM tabla.");
+            return;
+        }
+        symbols.put("table", delete.group("table"));
+        if (delete.group("where") == null || delete.group("where").isBlank()) {
+            warnings.add("DELETE sin WHERE puede eliminar multiples registros.");
+        }
+    }
+
+    private void validateCreateTable(
+            String query,
+            DatabaseEngine engine,
+            List<String> errors,
+            List<String> warnings,
+            Map<String, Object> symbols
+    ) {
+        Matcher create = CREATE_TABLE_PATTERN.matcher(query);
+        if (!create.matches()) {
+            errors.add("CREATE TABLE debe incluir nombre de tabla y columnas entre parentesis.");
+            return;
+        }
+
+        List<String> definitions = parseList(create.group("columns"));
+        symbols.put("createColumns", definitions);
+        if (definitions.isEmpty()) {
+            errors.add("CREATE TABLE debe incluir al menos una columna.");
+            return;
+        }
+
+        Set<String> seenColumns = new HashSet<>();
+        int primaryKeys = 0;
+        for (String definition : definitions) {
+            String[] parts = definition.trim().split("\\s+");
+            if (parts.length < 2) {
+                errors.add("Columna incompleta en CREATE TABLE: " + definition + ".");
+                continue;
+            }
+            String columnName = parts[0].toLowerCase(Locale.ROOT);
+            String dataType = parts[1].toUpperCase(Locale.ROOT);
+            if (!seenColumns.add(columnName)) {
+                errors.add("CREATE TABLE contiene columna repetida: " + parts[0] + ".");
+            }
+            if (!isTypeAllowed(dataType, engine)) {
+                errors.add("Tipo de dato no valido para " + engine.name() + ": " + dataType + ".");
+            }
+            if (definition.toUpperCase(Locale.ROOT).contains("PRIMARY KEY")) {
+                primaryKeys++;
+            }
+        }
+        if (primaryKeys > 1) {
+            errors.add("CREATE TABLE contiene mas de una PRIMARY KEY.");
+        }
+    }
+
+    private void validateDropTable(String query, List<String> warnings, Map<String, Object> symbols) {
+        Matcher drop = DROP_TABLE_PATTERN.matcher(query);
+        if (drop.matches()) {
+            symbols.put("table", drop.group("table"));
+        }
+        warnings.add("DROP TABLE es una operacion destructiva.");
+    }
+
     private void validateWhere(
             WhereCondition where,
             TableDefinition table,
@@ -193,6 +349,49 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         return Set.of("INTEGER", "DECIMAL", "FLOAT", "DOUBLE", "NUMERIC").contains(dataType);
     }
 
+    private boolean isTypeAllowed(String dataType, DatabaseEngine engine) {
+        Set<String> common = Set.of("INT", "INTEGER", "BIGINT", "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "DATE", "TIMESTAMP", "BOOLEAN", "BOOL", "TEXT", "VARCHAR", "CHAR");
+        if (common.contains(dataType)) {
+            return true;
+        }
+        if (engine == DatabaseEngine.MYSQL) {
+            return Set.of("AUTO_INCREMENT", "TINYINT", "DATETIME", "ENUM").contains(dataType);
+        }
+        if (engine == DatabaseEngine.POSTGRESQL) {
+            return Set.of("SERIAL", "BIGSERIAL", "JSON", "JSONB").contains(dataType);
+        }
+        if (engine == DatabaseEngine.SQL_SERVER) {
+            return Set.of("IDENTITY", "NVARCHAR", "BIT", "DATETIME2").contains(dataType);
+        }
+        return false;
+    }
+
+    private List<String> parseList(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.split(","))
+                .map(String::trim)
+                .toList();
+    }
+
+    private void addDuplicateErrors(List<String> values, String messagePrefix, List<String> errors) {
+        Set<String> seen = new HashSet<>();
+        for (String value : values) {
+            String normalized = value.toLowerCase(Locale.ROOT);
+            if (!seen.add(normalized)) {
+                errors.add(messagePrefix + value + ".");
+            }
+        }
+    }
+
+    private void setIssues(List<String> errors, List<String> warnings) {
+        List<ValidationIssue> nextIssues = new ArrayList<>();
+        errors.forEach(error -> nextIssues.add(ValidationIssue.error("SEMANTIC", error, 1, 1, "")));
+        warnings.forEach(warning -> nextIssues.add(ValidationIssue.warning("SEMANTIC", warning, 1, 1, "")));
+        issues.set(List.copyOf(nextIssues));
+    }
+
     private SemanticResult result(List<String> errors, List<String> warnings, Map<String, Object> symbols) {
         symbols.put(SemanticSymbols.ERRORS, List.copyOf(errors));
         return new SemanticResult(errors.isEmpty(), List.copyOf(warnings), Map.copyOf(symbols));
@@ -200,6 +399,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
     private record QueryShape(
             Optional<String> operation,
+            String rawQuery,
             Optional<String> tableName,
             List<String> columns,
             Optional<WhereCondition> where
@@ -222,6 +422,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
                     String tail = select.group("tail");
                     return new QueryShape(
                             Optional.of(operation),
+                            normalized,
                             tableFromAttributes.or(() -> Optional.of(table)),
                             columnsFromAttributes.isEmpty() ? parseColumns(rawColumns) : columnsFromAttributes,
                             parseWhere(tail)
@@ -231,6 +432,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
             return new QueryShape(
                     Optional.ofNullable(operation.isBlank() ? null : operation),
+                    normalized,
                     tableFromAttributes,
                     columnsFromAttributes,
                     Optional.empty()

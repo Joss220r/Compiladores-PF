@@ -23,8 +23,20 @@ const resultClass = computed(() => {
     return ''
   }
 
-  return result.value.valid ? 'result-ok' : 'result-error'
+  return result.value.success ? 'result-ok' : 'result-error'
 })
+
+const groupedErrors = computed(() => groupIssues(result.value?.errors || []))
+const groupedWarnings = computed(() => groupIssues(result.value?.warnings || []))
+
+function groupIssues(issues) {
+  return issues.reduce((groups, issue) => {
+    const phase = issue.phase || 'SYSTEM'
+    groups[phase] = groups[phase] || []
+    groups[phase].push(issue)
+    return groups
+  }, {})
+}
 
 async function submitQuery() {
   loading.value = true
@@ -37,10 +49,18 @@ async function submitQuery() {
       query: query.value
     })
   } catch (error) {
-    const details = Array.isArray(error.cause?.errors)
-      ? error.cause.errors.join(' ')
-      : error.message
-    errorMessage.value = details
+    result.value = {
+      success: false,
+      message: error.message || 'Ocurrio un error al comunicarse con el backend.',
+      errors: Array.isArray(error.cause?.errors)
+        ? error.cause.errors
+        : [{ phase: 'SYSTEM', severity: 'ERROR', message: error.message }],
+      warnings: [],
+      tokens: [],
+      ast: null,
+      semanticResult: null,
+      output: null
+    }
   } finally {
     loading.value = false
   }
@@ -98,7 +118,7 @@ function clearForm() {
         <div class="panel-header">
           <h2>Resultado</h2>
           <span v-if="result" class="result-badge" :class="resultClass">
-            {{ result.valid ? 'Valida' : 'Invalida' }}
+            {{ result.success ? 'Valida' : 'Invalida' }}
           </span>
         </div>
 
@@ -107,33 +127,64 @@ function clearForm() {
         </div>
 
         <div v-else-if="result" class="result-content">
-          <p class="message">{{ result.message }}</p>
+          <p class="message">
+            {{ result.success ? 'Consulta valida.' : 'Se encontraron errores en la consulta.' }}
+          </p>
 
-          <section v-if="result.errors?.length" class="result-section">
+          <section v-if="result.errors?.length" class="result-section issue-section">
             <h3>Errores</h3>
-            <ul>
-              <li v-for="item in result.errors" :key="item">{{ item }}</li>
-            </ul>
-          </section>
-
-          <section class="result-section">
-            <h3>Tokens</h3>
-            <div class="token-grid">
-              <span v-for="token in result.tokens" :key="`${token.lexeme}-${token.column}`">
-                {{ token.type }}: {{ token.lexeme }}
-              </span>
+            <div v-for="(items, phase) in groupedErrors" :key="phase" class="issue-group">
+              <h4>{{ phase }}</h4>
+              <ul>
+                <li v-for="(item, index) in items" :key="`${phase}-${index}`" class="issue-item">
+                  <span class="issue-message">{{ item.message }}</span>
+                  <span class="issue-badges">
+                    <span>{{ item.severity || 'ERROR' }}</span>
+                    <span>L {{ item.line || 1 }}</span>
+                    <span>C {{ item.column || 1 }}</span>
+                    <span v-if="item.fragment">{{ item.fragment }}</span>
+                  </span>
+                </li>
+              </ul>
             </div>
           </section>
 
-          <section class="result-section">
-            <h3>AST</h3>
-            <pre>{{ JSON.stringify(result.ast, null, 2) }}</pre>
+          <section v-if="result.warnings?.length" class="result-section issue-section">
+            <h3>Warnings</h3>
+            <div v-for="(items, phase) in groupedWarnings" :key="phase" class="issue-group warning-group">
+              <h4>{{ phase }}</h4>
+              <ul>
+                <li v-for="(item, index) in items" :key="`${phase}-${index}`" class="issue-item">
+                  <span class="issue-message">{{ item.message }}</span>
+                  <span class="issue-badges">
+                    <span>{{ item.severity || 'WARNING' }}</span>
+                    <span>L {{ item.line || 1 }}</span>
+                    <span>C {{ item.column || 1 }}</span>
+                    <span v-if="item.fragment">{{ item.fragment }}</span>
+                  </span>
+                </li>
+              </ul>
+            </div>
           </section>
 
-          <section class="result-section">
-            <h3>Semantico</h3>
+          <details class="result-section">
+            <summary>Tokens</summary>
+            <div class="token-grid">
+              <span v-for="(token, index) in result.tokens" :key="`${token.lexeme}-${token.line}-${token.column}-${index}`">
+                {{ token.type }}: {{ token.lexeme }}
+              </span>
+            </div>
+          </details>
+
+          <details class="result-section">
+            <summary>AST</summary>
+            <pre>{{ JSON.stringify(result.ast, null, 2) }}</pre>
+          </details>
+
+          <details class="result-section">
+            <summary>Resultado semantico</summary>
             <pre>{{ JSON.stringify(result.semanticResult, null, 2) }}</pre>
-          </section>
+          </details>
         </div>
 
         <div v-else class="empty-state">

@@ -4,34 +4,47 @@ import com.compiladores.sqlplatform.model.AstNode;
 import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.SemanticResult;
 import com.compiladores.sqlplatform.model.TokenInfo;
+import com.compiladores.sqlplatform.model.ValidationIssue;
 import java.util.List;
 
 public class QueryValidationResponse {
 
+    private boolean success;
     private boolean valid;
     private DatabaseEngine engine;
     private String message;
-    private List<String> errors;
+    private List<ValidationIssue> errors;
+    private List<ValidationIssue> warnings;
     private List<TokenInfo> tokens;
     private AstNode ast;
     private SemanticResult semanticResult;
+    private Object output;
 
     public QueryValidationResponse(
-            boolean valid,
+            boolean success,
             DatabaseEngine engine,
             String message,
-            List<String> errors,
+            List<ValidationIssue> errors,
+            List<ValidationIssue> warnings,
             List<TokenInfo> tokens,
             AstNode ast,
-            SemanticResult semanticResult
+            SemanticResult semanticResult,
+            Object output
     ) {
-        this.valid = valid;
+        this.success = success;
+        this.valid = success;
         this.engine = engine;
         this.message = message;
         this.errors = errors;
+        this.warnings = warnings;
         this.tokens = tokens;
         this.ast = ast;
         this.semanticResult = semanticResult;
+        this.output = output;
+    }
+
+    public boolean isSuccess() {
+        return success;
     }
 
     public boolean isValid() {
@@ -46,8 +59,12 @@ public class QueryValidationResponse {
         return message;
     }
 
-    public List<String> getErrors() {
+    public List<ValidationIssue> getErrors() {
         return errors;
+    }
+
+    public List<ValidationIssue> getWarnings() {
+        return warnings;
     }
 
     public List<TokenInfo> getTokens() {
@@ -60,5 +77,9 @@ public class QueryValidationResponse {
 
     public SemanticResult getSemanticResult() {
         return semanticResult;
+    }
+
+    public Object getOutput() {
+        return output;
     }
 }

@@ -3,11 +3,15 @@ package com.compiladores.sqlplatform.service.compiler;
 import com.compiladores.sqlplatform.model.AstNode;
 import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.TokenInfo;
+import com.compiladores.sqlplatform.model.ValidationIssue;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,9 +19,42 @@ public class BasicSqlParserAdapter implements ParserPort {
 
     private static final String PARSER_READY = "BASIC_SQL_PARSER";
     private static final String PARSER_ERROR = "BASIC_SQL_PARSER_WITH_ERRORS";
+    private static final Pattern MONGO_PATTERN = Pattern.compile(
+            "(?is)^\\s*db\\.([a-zA-Z_][\\w]*)\\.([a-zA-Z_][\\w]*)\\s*\\((.*)\\)\\s*;?\\s*$"
+    );
+    private static final Set<String> MONGO_OPERATIONS = Set.of(
+            "find", "insertOne", "insertMany", "updateOne", "updateMany", "deleteOne", "deleteMany"
+    );
+    private static final Map<String, Integer> REDIS_MIN_ARGS = Map.ofEntries(
+            Map.entry("SET", 2),
+            Map.entry("GET", 1),
+            Map.entry("DEL", 1),
+            Map.entry("EXISTS", 1),
+            Map.entry("EXPIRE", 2),
+            Map.entry("TTL", 1),
+            Map.entry("HSET", 3),
+            Map.entry("HGET", 2),
+            Map.entry("HGETALL", 1),
+            Map.entry("LPUSH", 2),
+            Map.entry("RPUSH", 2),
+            Map.entry("LPOP", 1),
+            Map.entry("RPOP", 1),
+            Map.entry("SADD", 2),
+            Map.entry("SMEMBERS", 1)
+    );
+
+    private final ThreadLocal<List<ValidationIssue>> issues = ThreadLocal.withInitial(List::of);
 
     @Override
     public AstNode parse(List<TokenInfo> tokens, String query, DatabaseEngine engine) {
+        issues.set(List.of());
+        if (engine == DatabaseEngine.MONGODB) {
+            return parseMongo(query);
+        }
+        if (engine == DatabaseEngine.REDIS) {
+            return parseRedis(tokens, query);
+        }
+
         ParserState state = new ParserState(expand(tokens));
         List<String> errors = new ArrayList<>();
         AstNode statement = parseStatement(state, errors);
@@ -37,11 +74,125 @@ public class BasicSqlParserAdapter implements ParserPort {
             attributes.put("statementType", statement.getType());
         }
 
+        List<ValidationIssue> parserIssues = errors.stream()
+                .map(error -> issue(error, state.currentLine(), state.currentColumn(), state.currentFragment()))
+                .toList();
+        issues.set(parserIssues);
+
         for (String error : errors) {
             children.add(node("SyntaxError", error, Map.of(), List.of()));
         }
 
         return node("Query", query, attributes, children);
+    }
+
+    @Override
+    public List<ValidationIssue> getIssues() {
+        return issues.get();
+    }
+
+    private AstNode parseMongo(String query) {
+        List<ValidationIssue> parserIssues = new ArrayList<>();
+        Matcher matcher = MONGO_PATTERN.matcher(query == null ? "" : query);
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("engine", DatabaseEngine.MONGODB.name());
+
+        if (!matcher.matches()) {
+            parserIssues.add(issue(
+                    "MongoDB debe usar la forma db.coleccion.operacion(...).",
+                    1,
+                    1,
+                    firstFragment(query)
+            ));
+            attributes.put("parserStatus", PARSER_ERROR);
+            attributes.put("errors", messages(parserIssues));
+            issues.set(parserIssues);
+            return node("MongoQuery", query, attributes, syntaxErrorChildren(parserIssues));
+        }
+
+        String collection = matcher.group(1);
+        String operation = matcher.group(2);
+        String rawArguments = matcher.group(3).trim();
+        List<String> arguments = splitTopLevelArguments(rawArguments);
+
+        attributes.put("collection", collection);
+        attributes.put("operation", operation);
+        attributes.put("argumentCount", arguments.size());
+
+        if (!MONGO_OPERATIONS.contains(operation)) {
+            parserIssues.add(issue("Operacion MongoDB no soportada: " + operation + ".", 1, query.indexOf(operation) + 1, operation));
+        }
+        if ((operation.equals("updateOne") || operation.equals("updateMany")) && arguments.size() != 2) {
+            parserIssues.add(issue(operation + " requiere filtro y actualizacion.", 1, query.indexOf(operation) + 1, operation));
+        }
+        if ((operation.equals("find") || operation.equals("insertOne") || operation.equals("deleteOne")
+                || operation.equals("deleteMany")) && arguments.size() != 1) {
+            parserIssues.add(issue(operation + " requiere exactamente un argumento.", 1, query.indexOf(operation) + 1, operation));
+        }
+        if (operation.equals("insertMany") && (arguments.size() != 1 || !rawArguments.stripLeading().startsWith("["))) {
+            parserIssues.add(issue("insertMany requiere un arreglo de documentos.", 1, query.indexOf(operation) + 1, operation));
+        }
+        if ((operation.equals("updateOne") || operation.equals("updateMany"))
+                && arguments.size() == 2
+                && arguments.get(1).matches("(?is).*\\bset\\s*:.*")
+                && !arguments.get(1).contains("$set")) {
+            parserIssues.add(issue("En MongoDB usa $set, no set, dentro de la actualizacion.", 1, query.indexOf("set") + 1, "set"));
+        }
+
+        attributes.put("parserStatus", parserIssues.isEmpty() ? "BASIC_MONGODB_PARSER" : PARSER_ERROR);
+        attributes.put("errors", messages(parserIssues));
+        issues.set(parserIssues);
+
+        return node("MongoQuery", query, attributes, List.of(
+                node("Collection", collection, Map.of(), List.of()),
+                node("Operation", operation, Map.of("arguments", arguments), List.of())
+        ));
+    }
+
+    private AstNode parseRedis(List<TokenInfo> tokens, String query) {
+        List<ValidationIssue> parserIssues = new ArrayList<>();
+        List<TokenInfo> meaningfulTokens = tokens.stream()
+                .filter(token -> !"COMMENT".equals(token.getType()))
+                .toList();
+        List<String> words = splitRedisWords(query);
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("engine", DatabaseEngine.REDIS.name());
+
+        if (meaningfulTokens.isEmpty() || words.isEmpty()) {
+            parserIssues.add(issue("Redis requiere un comando.", 1, 1, ""));
+            attributes.put("parserStatus", PARSER_ERROR);
+            attributes.put("errors", messages(parserIssues));
+            issues.set(parserIssues);
+            return node("RedisCommand", query, attributes, syntaxErrorChildren(parserIssues));
+        }
+
+        TokenInfo commandToken = meaningfulTokens.get(0);
+        String command = words.get(0).toUpperCase(Locale.ROOT);
+        List<String> arguments = words.subList(1, words.size());
+        attributes.put("operation", command);
+        attributes.put("argumentCount", arguments.size());
+
+        Integer minArgs = REDIS_MIN_ARGS.get(command);
+        if (minArgs == null) {
+            parserIssues.add(issue("Comando Redis no soportado: " + command + ".", commandToken.getLine(), commandToken.getColumn(), commandToken.getLexeme()));
+        } else if (arguments.size() < minArgs) {
+            parserIssues.add(issue("El comando " + command + " requiere al menos " + minArgs + " argumento(s).",
+                    commandToken.getLine(), commandToken.getColumn(), commandToken.getLexeme()));
+        }
+        if ("EXPIRE".equals(command) && arguments.size() >= 2 && !arguments.get(1).matches("\\d+")) {
+            parserIssues.add(issue("EXPIRE requiere segundos numericos.", 1, query.indexOf(arguments.get(1)) + 1, arguments.get(1)));
+        }
+
+        attributes.put("parserStatus", parserIssues.isEmpty() ? "BASIC_REDIS_PARSER" : PARSER_ERROR);
+        attributes.put("errors", messages(parserIssues));
+        issues.set(parserIssues);
+
+        return node("RedisCommand", query, attributes, List.of(
+                node("Command", command, tokenAttributes(new SqlToken(commandToken.getType(), commandToken.getLexeme(), commandToken.getLine(), commandToken.getColumn())), List.of()),
+                node("Arguments", null, Map.of("count", arguments.size()), arguments.stream()
+                        .map(argument -> tokenNode("Argument", new SqlToken("ARGUMENT", argument, 1, query.indexOf(argument) + 1)))
+                        .toList())
+        ));
     }
 
     private AstNode parseStatement(ParserState state, List<String> errors) {
@@ -62,8 +213,14 @@ public class BasicSqlParserAdapter implements ParserPort {
         if (state.matchKeyword("DELETE")) {
             return parseDelete(state, errors);
         }
+        if (state.matchKeyword("CREATE")) {
+            return parseCreateTable(state, errors);
+        }
+        if (state.matchKeyword("DROP")) {
+            return parseDropTable(state, errors);
+        }
 
-        errors.add("Se esperaba SELECT, INSERT, UPDATE o DELETE y se encontro '" + state.peek().lexeme() + "'.");
+        errors.add("Se esperaba SELECT, INSERT, UPDATE, DELETE, CREATE o DROP y se encontro '" + state.peek().lexeme() + "'.");
         return null;
     }
 
@@ -152,6 +309,37 @@ public class BasicSqlParserAdapter implements ParserPort {
         parseOptionalWhere(state, errors, children);
         consumeOptionalSemicolon(state);
         return node("DeleteStatement", "DELETE", Map.of(), children);
+    }
+
+    private AstNode parseCreateTable(ParserState state, List<String> errors) {
+        List<AstNode> children = new ArrayList<>();
+        if (!state.matchKeyword("TABLE")) {
+            errors.add("CREATE debe estar seguido por TABLE.");
+        }
+
+        SqlToken table = consumeIdentifier(state, "nombre de tabla en CREATE TABLE", errors);
+        children.add(node("Table", valueOf(table), tokenAttributes(table), List.of()));
+
+        if (state.matchSymbol("(")) {
+            children.add(parseDelimitedList(state, "ColumnDefinitionList", "ColumnDefinition", ")", errors));
+        } else {
+            errors.add("CREATE TABLE debe incluir columnas entre parentesis.");
+        }
+
+        consumeOptionalSemicolon(state);
+        return node("CreateTableStatement", "CREATE TABLE", Map.of(), children);
+    }
+
+    private AstNode parseDropTable(ParserState state, List<String> errors) {
+        List<AstNode> children = new ArrayList<>();
+        if (!state.matchKeyword("TABLE")) {
+            errors.add("DROP debe estar seguido por TABLE.");
+        }
+
+        SqlToken table = consumeIdentifier(state, "nombre de tabla en DROP TABLE", errors);
+        children.add(node("Table", valueOf(table), tokenAttributes(table), List.of()));
+        consumeOptionalSemicolon(state);
+        return node("DropTableStatement", "DROP TABLE", Map.of(), children);
     }
 
     private AstNode parseAssignments(ParserState state, List<String> errors) {
@@ -288,6 +476,104 @@ public class BasicSqlParserAdapter implements ParserPort {
 
     private static AstNode node(String type, String value, Map<String, Object> attributes, List<AstNode> children) {
         return new AstNode(type, value, attributes, children);
+    }
+
+    private static ValidationIssue issue(String message, int line, int column, String fragment) {
+        return ValidationIssue.error("PARSER", message, line <= 0 ? 1 : line, column <= 0 ? 1 : column, fragment);
+    }
+
+    private static List<String> messages(List<ValidationIssue> issues) {
+        return issues.stream().map(ValidationIssue::getMessage).toList();
+    }
+
+    private static List<AstNode> syntaxErrorChildren(List<ValidationIssue> issues) {
+        return issues.stream()
+                .map(issue -> node("SyntaxError", issue.getMessage(), Map.of(
+                        "line", issue.getLine(),
+                        "column", issue.getColumn(),
+                        "fragment", issue.getFragment()
+                ), List.of()))
+                .toList();
+    }
+
+    private static String firstFragment(String query) {
+        if (query == null || query.isBlank()) {
+            return "";
+        }
+        return query.trim().split("\\s+")[0];
+    }
+
+    private static List<String> splitTopLevelArguments(String rawArguments) {
+        List<String> arguments = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int depth = 0;
+        char quote = 0;
+
+        for (int index = 0; index < rawArguments.length(); index++) {
+            char character = rawArguments.charAt(index);
+            if (quote != 0) {
+                current.append(character);
+                if (character == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (character == '\'' || character == '"') {
+                quote = character;
+                current.append(character);
+                continue;
+            }
+            if (character == '{' || character == '[' || character == '(') {
+                depth++;
+            } else if (character == '}' || character == ']' || character == ')') {
+                depth--;
+            } else if (character == ',' && depth == 0) {
+                arguments.add(current.toString().trim());
+                current.setLength(0);
+                continue;
+            }
+            current.append(character);
+        }
+
+        if (!current.toString().trim().isEmpty()) {
+            arguments.add(current.toString().trim());
+        }
+        return arguments;
+    }
+
+    private static List<String> splitRedisWords(String query) {
+        List<String> words = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+
+        for (int index = 0; index < query.length(); index++) {
+            char character = query.charAt(index);
+            if (quote != 0) {
+                current.append(character);
+                if (character == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (character == '\'' || character == '"') {
+                quote = character;
+                current.append(character);
+                continue;
+            }
+            if (Character.isWhitespace(character)) {
+                if (!current.isEmpty()) {
+                    words.add(current.toString());
+                    current.setLength(0);
+                }
+                continue;
+            }
+            current.append(character);
+        }
+
+        if (!current.isEmpty()) {
+            words.add(current.toString());
+        }
+        return words;
     }
 
     private static String valueOf(SqlToken token) {
@@ -468,6 +754,36 @@ public class BasicSqlParserAdapter implements ParserPort {
 
         private SqlToken peek() {
             return tokens.get(position);
+        }
+
+        private int currentLine() {
+            if (tokens.isEmpty()) {
+                return 1;
+            }
+            if (position >= tokens.size()) {
+                return tokens.get(tokens.size() - 1).line();
+            }
+            return peek().line();
+        }
+
+        private int currentColumn() {
+            if (tokens.isEmpty()) {
+                return 1;
+            }
+            if (position >= tokens.size()) {
+                return tokens.get(tokens.size() - 1).column();
+            }
+            return peek().column();
+        }
+
+        private String currentFragment() {
+            if (tokens.isEmpty()) {
+                return "";
+            }
+            if (position >= tokens.size()) {
+                return tokens.get(tokens.size() - 1).lexeme();
+            }
+            return peek().lexeme();
         }
 
         private SqlToken advance() {

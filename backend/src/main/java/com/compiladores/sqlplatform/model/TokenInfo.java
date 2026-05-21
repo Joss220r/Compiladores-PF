@@ -22,6 +22,10 @@ public class TokenInfo {
         return lexeme;
     }
 
+    public String getValue() {
+        return lexeme;
+    }
+
     public int getLine() {
         return line;
     }

@@ -18,11 +18,16 @@ export async function validateQuery(payload) {
     )
   }
 
-  const data = await response.json()
+  let data = null
+  try {
+    data = await response.json()
+  } catch (error) {
+    data = null
+  }
 
   if (!response.ok) {
-    const message = data?.message || 'No se pudo validar la query.'
-    throw new Error(message, { cause: data })
+    const message = data?.message || 'Ocurrio un error al comunicarse con el backend.'
+    throw new Error(message, { cause: data || { errors: [{ phase: 'SYSTEM', severity: 'ERROR', message }] } })
   }
 
   return data

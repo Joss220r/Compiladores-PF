@@ -2,7 +2,10 @@ package com.compiladores.sqlplatform.service.compiler;
 
 import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.TokenInfo;
+import com.compiladores.sqlplatform.model.ValidationIssue;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +14,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class BasicLexerAdapter implements LexerPort {
+
+    private final ThreadLocal<List<ValidationIssue>> issues = ThreadLocal.withInitial(List::of);
 
     private static final Set<String> GENERIC_SQL_KEYWORDS = Set.of(
             "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE",
@@ -70,7 +75,14 @@ public class BasicLexerAdapter implements LexerPort {
     @Override
     public List<TokenInfo> tokenize(String query, DatabaseEngine engine) {
         LexerState state = new LexerState(query == null ? "" : query, engine);
-        return state.scan();
+        List<TokenInfo> tokens = state.scan();
+        issues.set(List.copyOf(state.issues));
+        return tokens;
+    }
+
+    @Override
+    public List<ValidationIssue> getIssues() {
+        return issues.get();
     }
 
     private static String classifyWord(String lexeme, DatabaseEngine engine) {
@@ -87,6 +99,8 @@ public class BasicLexerAdapter implements LexerPort {
         private final String query;
         private final DatabaseEngine engine;
         private final List<TokenInfo> tokens = new ArrayList<>();
+        private final List<ValidationIssue> issues = new ArrayList<>();
+        private final Deque<Delimiter> delimiters = new ArrayDeque<>();
         private int index;
         private int line = 1;
         private int column = 1;
@@ -110,7 +124,7 @@ public class BasicLexerAdapter implements LexerPort {
                     scanQuotedText(current, "STRING");
                 } else if (current == '`') {
                     scanQuotedText(current, "IDENTIFIER");
-                } else if (current == '[') {
+                } else if (current == '[' && engine == DatabaseEngine.SQL_SERVER) {
                     scanBracketIdentifier();
                 } else if (current == '$' && tryScanDollarQuotedString()) {
                     continue;
@@ -121,12 +135,31 @@ public class BasicLexerAdapter implements LexerPort {
                 } else if (tryScanOperator()) {
                     continue;
                 } else if (SYMBOLS.contains(current)) {
+                    trackDelimiter(current, line, column);
                     addToken("SYMBOL", String.valueOf(current), line, column);
                     advance();
                 } else {
+                    issues.add(ValidationIssue.error(
+                            "LEXER",
+                            "Caracter desconocido '" + current + "'.",
+                            line,
+                            column,
+                            String.valueOf(current)
+                    ));
                     addToken("UNKNOWN", String.valueOf(current), line, column);
                     advance();
                 }
+            }
+
+            while (!delimiters.isEmpty()) {
+                Delimiter delimiter = delimiters.pop();
+                issues.add(ValidationIssue.error(
+                        "LEXER",
+                        "Falta cerrar '" + delimiter.opening + "' con '" + delimiter.expectedClosing + "'.",
+                        delimiter.line,
+                        delimiter.column,
+                        String.valueOf(delimiter.opening)
+                ));
             }
 
             return tokens;
@@ -152,6 +185,7 @@ public class BasicLexerAdapter implements LexerPort {
             advance();
             advance();
 
+            boolean closed = false;
             while (!isAtEnd() && !startsWith("*/")) {
                 advance();
             }
@@ -159,6 +193,17 @@ public class BasicLexerAdapter implements LexerPort {
             if (!isAtEnd()) {
                 advance();
                 advance();
+                closed = true;
+            }
+
+            if (!closed) {
+                issues.add(ValidationIssue.error(
+                        "LEXER",
+                        "Comentario de bloque sin cerrar.",
+                        startLine,
+                        startColumn,
+                        query.substring(start)
+                ));
             }
 
             addToken("COMMENT", query.substring(start, index), startLine, startColumn);
@@ -170,6 +215,7 @@ public class BasicLexerAdapter implements LexerPort {
             int start = index;
 
             advance();
+            boolean closed = false;
             while (!isAtEnd()) {
                 char current = advance();
 
@@ -178,12 +224,23 @@ public class BasicLexerAdapter implements LexerPort {
                         advance();
                         continue;
                     }
+                    closed = true;
                     break;
                 }
 
                 if (current == '\\' && !isAtEnd()) {
                     advance();
                 }
+            }
+
+            if (!closed) {
+                issues.add(ValidationIssue.error(
+                        "LEXER",
+                        "Comilla " + quote + " sin cerrar.",
+                        startLine,
+                        startColumn,
+                        query.substring(start)
+                ));
             }
 
             addToken(type, query.substring(start, index), startLine, startColumn);
@@ -195,11 +252,23 @@ public class BasicLexerAdapter implements LexerPort {
             int start = index;
 
             advance();
+            boolean closed = false;
             while (!isAtEnd() && peek() != ']') {
                 advance();
             }
             if (!isAtEnd()) {
                 advance();
+                closed = true;
+            }
+
+            if (!closed) {
+                issues.add(ValidationIssue.error(
+                        "LEXER",
+                        "Corchete '[' sin cerrar.",
+                        startLine,
+                        startColumn,
+                        query.substring(start)
+                ));
             }
 
             addToken("IDENTIFIER", query.substring(start, index), startLine, startColumn);
@@ -226,8 +295,57 @@ public class BasicLexerAdapter implements LexerPort {
                 advance();
             }
 
+            if (closingIndex < 0) {
+                issues.add(ValidationIssue.error(
+                        "LEXER",
+                        "Cadena dollar-quoted sin cerrar.",
+                        startLine,
+                        startColumn,
+                        query.substring(start)
+                ));
+            }
+
             addToken("STRING", query.substring(start, index), startLine, startColumn);
             return true;
+        }
+
+        private void trackDelimiter(char current, int currentLine, int currentColumn) {
+            if (current == '(') {
+                delimiters.push(new Delimiter('(', ')', currentLine, currentColumn));
+                return;
+            }
+            if (current == '{') {
+                delimiters.push(new Delimiter('{', '}', currentLine, currentColumn));
+                return;
+            }
+            if (current == '[') {
+                delimiters.push(new Delimiter('[', ']', currentLine, currentColumn));
+                return;
+            }
+            if (current == ')' || current == '}' || current == ']') {
+                if (delimiters.isEmpty()) {
+                    issues.add(ValidationIssue.error(
+                            "LEXER",
+                            "Cierre '" + current + "' sin apertura.",
+                            currentLine,
+                            currentColumn,
+                            String.valueOf(current)
+                    ));
+                    return;
+                }
+
+                Delimiter opening = delimiters.pop();
+                if (opening.expectedClosing != current) {
+                    issues.add(ValidationIssue.error(
+                            "LEXER",
+                            "Se esperaba cerrar '" + opening.opening + "' con '" + opening.expectedClosing
+                                    + "' pero se encontro '" + current + "'.",
+                            currentLine,
+                            currentColumn,
+                            String.valueOf(current)
+                    ));
+                }
+            }
         }
 
         private void scanNumber() {
@@ -355,14 +473,20 @@ public class BasicLexerAdapter implements LexerPort {
         }
 
         private boolean isIdentifierStart(char character) {
-            return Character.isLetter(character) || character == '_' || character == '@' || character == '$';
+            return Character.isLetter(character)
+                    || character == '_'
+                    || character == '$'
+                    || (character == '@' && engine == DatabaseEngine.SQL_SERVER);
         }
 
         private boolean isIdentifierPart(char character) {
             return Character.isLetterOrDigit(character)
                     || character == '_'
                     || character == '$'
-                    || character == '@';
+                    || (character == '@' && engine == DatabaseEngine.SQL_SERVER);
+        }
+
+        private record Delimiter(char opening, char expectedClosing, int line, int column) {
         }
     }
 }

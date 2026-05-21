@@ -84,6 +84,12 @@ h3 {
   font-size: 0.95rem;
 }
 
+h4 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #503459;
+}
+
 .status-pill,
 .result-badge {
   display: inline-flex;
@@ -205,6 +211,57 @@ textarea:focus {
   border-top: 1px solid #dac9df;
   padding-top: 16px;
   margin-top: 16px;
+}
+
+summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #503459;
+}
+
+.issue-group {
+  border: 1px solid #dac9df;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+  background: #fbf8fc;
+}
+
+.warning-group {
+  background: #fffaf0;
+}
+
+.issue-group ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issue-item {
+  display: grid;
+  gap: 8px;
+}
+
+.issue-message {
+  color: #503459;
+  font-weight: 700;
+}
+
+.issue-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.issue-badges span {
+  border-radius: 999px;
+  background: #dac9df;
+  color: #503459;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
 }
 
 .token-grid {
