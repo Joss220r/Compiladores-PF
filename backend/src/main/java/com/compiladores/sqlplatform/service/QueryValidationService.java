@@ -42,8 +42,14 @@ public class QueryValidationService {
         issues.addAll(dialectValidationService.validate(normalizedQuery, request.getEngine()));
         AstNode ast = parser.parse(tokens, normalizedQuery, request.getEngine());
         issues.addAll(parser.getIssues());
-        SemanticResult semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
-        issues.addAll(semanticAnalyzer.getIssues());
+        SemanticResult semanticResult = null;
+
+        boolean hasBlockingDialectError = issues.stream()
+                .anyMatch(issue -> "DIALECT".equals(issue.getPhase()) && "ERROR".equals(issue.getSeverity()));
+        if (!hasBlockingDialectError) {
+            semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
+            issues.addAll(semanticAnalyzer.getIssues());
+        }
 
         if (normalizedQuery.isBlank()) {
             issues.add(ValidationIssue.error("PARSER", "La query no puede estar vacia.", 1, 1, ""));
@@ -55,7 +61,7 @@ public class QueryValidationService {
         List<ValidationIssue> warnings = issues.stream()
                 .filter(issue -> "WARNING".equals(issue.getSeverity()))
                 .toList();
-        boolean valid = errors.isEmpty() && semanticResult.isValid();
+        boolean valid = errors.isEmpty() && (semanticResult == null || semanticResult.isValid());
         String message = valid
                 ? "Query validada por Lexer, Parser y Analisis Semantico."
                 : "La query contiene errores.";

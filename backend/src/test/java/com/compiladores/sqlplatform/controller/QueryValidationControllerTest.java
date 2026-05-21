@@ -137,7 +137,7 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.valid").value(false))
                 .andExpect(jsonPath("$.errors[0].message", containsString("parece SQL")))
-                .andExpect(jsonPath("$.semanticResult.valid").value(false));
+                .andExpect(jsonPath("$.semanticResult").doesNotExist());
     }
 
     @Test
@@ -293,6 +293,21 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQueryRejectsMongoUpdateOneWithSetWithoutDollar() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateOne({ id: 1 }, { set: { nombre: \\"Carlos\\" } })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message", containsString("$set")));
+    }
+
+    @Test
     void validateQueryAcceptsRedisSet() throws Exception {
         String request = """
                 {
@@ -304,7 +319,40 @@ class QueryValidationControllerTest {
         mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(0)))
                 .andExpect(jsonPath("$.ast.type").value("RedisCommand"));
+    }
+
+    @Test
+    void validateQueryAcceptsMongoOperationsWithoutSemanticWarnings() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateOne({ id: 1 }, { $set: { nombre: \\"Carlos\\" } })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(0)));
+    }
+
+    @Test
+    void validateQueryDoesNotRunSemanticAfterDialectError() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT TOP 10 * FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].phase").value("DIALECT"))
+                .andExpect(jsonPath("$.errors[0].message", containsString("TOP no es valido")));
     }
 
     @Test

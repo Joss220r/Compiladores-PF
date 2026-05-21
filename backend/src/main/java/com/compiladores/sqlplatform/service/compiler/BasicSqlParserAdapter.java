@@ -132,13 +132,6 @@ public class BasicSqlParserAdapter implements ParserPort {
         if (operation.equals("insertMany") && (arguments.size() != 1 || !rawArguments.stripLeading().startsWith("["))) {
             parserIssues.add(issue("insertMany requiere un arreglo de documentos.", 1, query.indexOf(operation) + 1, operation));
         }
-        if ((operation.equals("updateOne") || operation.equals("updateMany"))
-                && arguments.size() == 2
-                && arguments.get(1).matches("(?is).*\\bset\\s*:.*")
-                && !arguments.get(1).contains("$set")) {
-            parserIssues.add(issue("En MongoDB usa $set, no set, dentro de la actualizacion.", 1, query.indexOf("set") + 1, "set"));
-        }
-
         attributes.put("parserStatus", parserIssues.isEmpty() ? "BASIC_MONGODB_PARSER" : PARSER_ERROR);
         attributes.put("errors", messages(parserIssues));
         issues.set(parserIssues);

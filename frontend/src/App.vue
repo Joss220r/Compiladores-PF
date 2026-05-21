@@ -1,9 +1,8 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { validateQuery } from './services/queryValidationApi'
 
 const engines = [
-  { label: 'SQL generico', value: 'SQL' },
   { label: 'NoSQL', value: 'NOSQL' },
   { label: 'MongoDB', value: 'MONGODB' },
   { label: 'SQL Server', value: 'SQL_SERVER' },
@@ -18,6 +17,7 @@ const result = ref(null)
 const errorMessage = ref('')
 const loading = ref(false)
 const theme = ref('light')
+const queryInput = ref(null)
 
 const resultClass = computed(() => {
   if (!result.value) {
@@ -83,6 +83,9 @@ function clearForm() {
   query.value = ''
   result.value = null
   errorMessage.value = ''
+  nextTick(() => {
+    queryInput.value?.focus()
+  })
 }
 
 function toggleTheme() {
@@ -120,6 +123,7 @@ function toggleTheme() {
             <span>Query</span>
             <textarea
               v-model="query"
+              ref="queryInput"
               rows="12"
               spellcheck="false"
               placeholder="Escribe aqui la query que quieres validar"

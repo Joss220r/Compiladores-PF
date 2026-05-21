@@ -80,10 +80,16 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         symbols.put("operation", query.operation().get());
-        validateEngineSupport(query.operation().get(), engine, errors);
+        if (RELATIONAL_ENGINES.contains(engine) || engine == DatabaseEngine.NOSQL) {
+            validateEngineSupport(query.operation().get(), engine, errors);
+        }
 
         if ("SELECT".equals(query.operation().get())) {
             validateSelect(query, engine, errors, warnings, symbols);
+        } else if (engine == DatabaseEngine.MONGODB) {
+            validateMongo(ast, errors, warnings, symbols);
+        } else if (engine == DatabaseEngine.REDIS) {
+            validateRedis(ast, errors, warnings, symbols);
         } else if ("INSERT".equals(query.operation().get())) {
             validateInsert(query.rawQuery(), errors, warnings, symbols);
         } else if ("UPDATE".equals(query.operation().get())) {
@@ -168,6 +174,89 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         query.where().ifPresent(where -> validateWhere(where, table.get(), tableName, errors, symbols));
+    }
+
+    private void validateMongo(AstNode ast, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
+        String collection = stringAttribute(ast, "collection").orElse("");
+        String operation = stringAttribute(ast, "operation").orElse("");
+        List<String> arguments = listAttribute(findChild(ast, "Operation"), "arguments");
+
+        symbols.put("collection", collection);
+        symbols.put("mongoOperation", operation);
+
+        if (collection.isBlank()) {
+            errors.add("MongoDB requiere nombre de coleccion.");
+        }
+        if (operation.isBlank()) {
+            errors.add("MongoDB requiere operacion.");
+            return;
+        }
+
+        switch (operation) {
+            case "find", "deleteOne", "deleteMany" -> {
+                if (arguments.size() != 1 || !looksLikeObject(arguments.get(0))) {
+                    errors.add(operation + " debe recibir un filtro en forma de objeto.");
+                }
+            }
+            case "insertOne" -> {
+                if (arguments.size() != 1 || !looksLikeObject(arguments.get(0))) {
+                    errors.add("insertOne debe recibir un documento en forma de objeto.");
+                }
+            }
+            case "insertMany" -> {
+                if (arguments.size() != 1 || !arguments.get(0).trim().startsWith("[")) {
+                    errors.add("insertMany debe recibir un arreglo de documentos.");
+                }
+            }
+            case "updateOne", "updateMany" -> {
+                if (arguments.size() != 2) {
+                    errors.add(operation + " debe recibir filtro y objeto de actualizacion.");
+                    return;
+                }
+                if (!looksLikeObject(arguments.get(0))) {
+                    errors.add(operation + " debe recibir un filtro en forma de objeto.");
+                }
+                if (!looksLikeObject(arguments.get(1))) {
+                    errors.add(operation + " debe recibir una actualizacion en forma de objeto.");
+                }
+                if (arguments.get(1).matches("(?is).*\\bset\\s*:.*") && !arguments.get(1).contains("$set")) {
+                    errors.add("En MongoDB usa $set, no set, dentro de la actualizacion.");
+                }
+                if (!containsAny(arguments.get(1), "$set", "$gt", "$lt", "$gte", "$lte", "$in")) {
+                    warnings.add(operation + " no usa operadores MongoDB reconocidos como $set.");
+                }
+            }
+            default -> errors.add("Operacion MongoDB no soportada: " + operation + ".");
+        }
+    }
+
+    private void validateRedis(AstNode ast, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
+        String command = stringAttribute(ast, "operation").orElse("").toUpperCase(Locale.ROOT);
+        List<String> arguments = childValues(findChild(ast, "Arguments"));
+        symbols.put("redisCommand", command);
+        symbols.put("redisArguments", arguments);
+
+        switch (command) {
+            case "SET" -> requireArgumentCount(command, arguments, 2, errors);
+            case "GET", "DEL", "TTL" -> requireArgumentCount(command, arguments, 1, errors);
+            case "EXPIRE" -> {
+                requireArgumentCount(command, arguments, 2, errors);
+                if (arguments.size() >= 2 && !arguments.get(1).matches("\\d+")) {
+                    errors.add("EXPIRE requiere segundos numericos.");
+                }
+            }
+            case "HSET" -> requireArgumentCount(command, arguments, 3, errors);
+            case "HGET" -> requireArgumentCount(command, arguments, 2, errors);
+            case "HGETALL", "LPOP", "RPOP", "SMEMBERS" -> requireArgumentCount(command, arguments, 1, errors);
+            case "LPUSH", "RPUSH", "SADD" -> requireArgumentCount(command, arguments, 2, errors);
+            default -> errors.add("Comando Redis no soportado: " + command + ".");
+        }
+    }
+
+    private void requireArgumentCount(String command, List<String> arguments, int expected, List<String> errors) {
+        if (arguments.size() < expected) {
+            errors.add("El comando " + command + " requiere al menos " + expected + " argumento(s).");
+        }
     }
 
     private void validateInsert(String query, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
@@ -362,6 +451,61 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
         if (engine == DatabaseEngine.SQL_SERVER) {
             return Set.of("IDENTITY", "NVARCHAR", "BIT", "DATETIME2").contains(dataType);
+        }
+        return false;
+    }
+
+    private Optional<AstNode> findChild(AstNode ast, String type) {
+        if (ast == null || ast.getChildren() == null) {
+            return Optional.empty();
+        }
+        return ast.getChildren().stream()
+                .filter(child -> type.equals(child.getType()))
+                .findFirst();
+    }
+
+    private Optional<String> stringAttribute(AstNode ast, String key) {
+        if (ast == null || ast.getAttributes() == null) {
+            return Optional.empty();
+        }
+        Object value = ast.getAttributes().get(key);
+        return value instanceof String text ? Optional.of(text) : Optional.empty();
+    }
+
+    private List<String> listAttribute(Optional<AstNode> ast, String key) {
+        if (ast.isEmpty() || ast.get().getAttributes() == null) {
+            return List.of();
+        }
+        Object value = ast.get().getAttributes().get(key);
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .toList();
+        }
+        return List.of();
+    }
+
+    private List<String> childValues(Optional<AstNode> ast) {
+        if (ast.isEmpty() || ast.get().getChildren() == null) {
+            return List.of();
+        }
+        return ast.get().getChildren().stream()
+                .map(AstNode::getValue)
+                .filter(value -> value != null && !value.isBlank())
+                .toList();
+    }
+
+    private boolean looksLikeObject(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        return trimmed.startsWith("{") && trimmed.endsWith("}");
+    }
+
+    private boolean containsAny(String value, String... options) {
+        for (String option : options) {
+            if (value.contains(option)) {
+                return true;
+            }
         }
         return false;
     }
