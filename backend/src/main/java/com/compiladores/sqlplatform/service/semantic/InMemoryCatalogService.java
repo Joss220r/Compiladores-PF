@@ -5,9 +5,11 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
+@ConditionalOnProperty(name = "app.catalog.source", havingValue = "memory", matchIfMissing = true)
 public class InMemoryCatalogService implements CatalogService {
 
     private final Map<String, TableDefinition> relationalCatalog;

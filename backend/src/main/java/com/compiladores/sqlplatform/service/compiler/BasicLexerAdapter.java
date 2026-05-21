@@ -10,7 +10,7 @@ import java.util.Set;
 import org.springframework.stereotype.Component;
 
 @Component
-public class MockLexerAdapter implements LexerPort {
+public class BasicLexerAdapter implements LexerPort {
 
     private static final Set<String> GENERIC_SQL_KEYWORDS = Set.of(
             "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE",

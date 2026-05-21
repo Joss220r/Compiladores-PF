@@ -36,6 +36,7 @@ public class QueryValidationService {
 
         List<TokenInfo> tokens = lexer.tokenize(normalizedQuery, request.getEngine());
         AstNode ast = parser.parse(tokens, normalizedQuery, request.getEngine());
+        errors.addAll(extractParserErrors(ast));
         SemanticResult semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
         errors.addAll(extractSemanticErrors(semanticResult));
 
@@ -57,6 +58,22 @@ public class QueryValidationService {
                 ast,
                 semanticResult
         );
+    }
+
+    private List<String> extractParserErrors(AstNode ast) {
+        if (ast == null || ast.getAttributes() == null) {
+            return List.of();
+        }
+
+        Object parserErrors = ast.getAttributes().get("errors");
+        if (parserErrors instanceof List<?> errors) {
+            return errors.stream()
+                    .filter(String.class::isInstance)
+                    .map(String.class::cast)
+                    .toList();
+        }
+
+        return List.of();
     }
 
     private List<String> extractSemanticErrors(SemanticResult semanticResult) {

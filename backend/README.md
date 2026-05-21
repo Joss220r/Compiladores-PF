@@ -22,7 +22,7 @@ backend/
     service/compiler/        # Interfaces para Lexer, Parser y Semantico
 ```
 
-`QueryValidationService` usa interfaces (`LexerPort`, `ParserPort`, `SemanticAnalyzerPort`) para no depender todavia de los modulos de Lexer, Parser y Semantico. Por ahora estan conectados adaptadores mock.
+`QueryValidationService` usa interfaces (`LexerPort`, `ParserPort`, `SemanticAnalyzerPort`) para mantener separados Lexer, Parser y Semantico. Actualmente hay lexer basico, parser SQL basico y analisis semantico inicial.
 
 ## Ejecutar localmente
 
@@ -60,7 +60,7 @@ Respuesta:
 {
   "valid": true,
   "engine": "SQL",
-  "message": "Query validada con mocks. Pendiente conectar Lexer, Parser y Semantico reales.",
+  "message": "Query validada por Lexer, Parser y Analisis Semantico.",
   "errors": [],
   "tokens": [],
   "ast": {},
@@ -72,11 +72,21 @@ Respuesta:
 
 - `PORT`: puerto del servidor. Render lo inyecta automaticamente.
 - `CORS_ALLOWED_ORIGINS`: origenes permitidos para el frontend, separados por coma.
+- `CATALOG_SOURCE`: `memory` para desarrollo local o `postgres` para usar Render PostgreSQL.
+- `DATABASE_URL`: URL JDBC de PostgreSQL cuando `CATALOG_SOURCE=postgres`.
+- `DATABASE_USERNAME`: usuario de PostgreSQL.
+- `DATABASE_PASSWORD`: password de PostgreSQL.
 
 Ejemplo:
 
 ```bash
 CORS_ALLOWED_ORIGINS=http://localhost:5173 mvn spring-boot:run
+```
+
+Ejemplo con catalogo en PostgreSQL:
+
+```bash
+CATALOG_SOURCE=postgres DATABASE_URL=jdbc:postgresql://HOST:5432/DATABASE DATABASE_USERNAME=USER DATABASE_PASSWORD=PASSWORD mvn spring-boot:run
 ```
 
 ## Render

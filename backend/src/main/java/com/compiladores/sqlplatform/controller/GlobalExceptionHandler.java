@@ -27,4 +27,14 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleServiceConfigurationError(IllegalStateException exception) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("valid", false);
+        body.put("message", "No se pudo completar la validacion.");
+        body.put("errors", List.of(exception.getMessage()));
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+    }
 }

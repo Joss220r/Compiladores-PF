@@ -1,6 +1,6 @@
 # SQL Platform Validator - Backend y Frontend
 
-Documentacion del bloque de Jose: backend, frontend, API de validacion, mocks de integracion y preparacion para Render.
+Documentacion del bloque de Jose: backend, frontend, API de validacion, integracion de modulos y preparacion para Render.
 
 Este bloque no implementa directamente Lexer, Parser ni Analisis Semantico reales. Es la base de integracion para que esos modulos se conecten despues mediante interfaces.
 
@@ -28,7 +28,8 @@ Incluido:
 - Servicio principal `QueryValidationService`.
 - DTOs y modelos de respuesta.
 - Interfaces para conectar Lexer, Parser y Semantico.
-- Mocks temporales para responder mientras los otros modulos no esten listos.
+- Lexer basico, parser SQL basico y analisis semantico inicial.
+- Catalogo semantico configurable: memoria local o PostgreSQL en Render.
 - Manejo basico de errores en frontend.
 - Pruebas basicas del endpoint.
 - Configuracion inicial para Render.
@@ -130,7 +131,7 @@ Respuesta esperada:
 {
   "valid": true,
   "engine": "SQL",
-  "message": "Query validada con mocks. Pendiente conectar Lexer, Parser y Semantico reales.",
+  "message": "Query validada por Lexer, Parser y Analisis Semantico.",
   "errors": [],
   "tokens": [],
   "ast": {},
@@ -151,12 +152,12 @@ backend/src/main/java/com/compiladores/sqlplatform/service/compiler/SemanticAnal
 Implementaciones actuales:
 
 ```text
-MockLexerAdapter.java
-MockParserAdapter.java
+BasicLexerAdapter.java
+BasicSqlParserAdapter.java
 service/semantic/SemanticAnalyzerAdapter.java
 ```
 
-Cuando el parser real este listo, `MockParserAdapter.java` se reemplaza o se desactiva.
+El catalogo semantico puede ejecutarse en memoria para desarrollo local o contra PostgreSQL para pruebas reales.
 
 ## Frontend
 
@@ -213,7 +214,7 @@ Para Render, esta variable debe apuntar a la URL publica del backend.
 
 ## Base de datos en Render
 
-Se creo una base PostgreSQL en Render para usarla despues como catalogo real del proyecto.
+Se creo una base PostgreSQL en Render para usarse como catalogo real del proyecto.
 
 Uso recomendado en esta fase:
 
@@ -227,12 +228,19 @@ No se recomienda ejecutar directamente las querys escritas por el usuario contra
 Variables sugeridas para backend:
 
 ```text
+CATALOG_SOURCE=postgres
 DATABASE_URL=jdbc:postgresql://HOST:5432/DATABASE
 DATABASE_USERNAME=USER
 DATABASE_PASSWORD=PASSWORD
 ```
 
 No subir credenciales reales al repositorio.
+
+Para desarrollo sin base de datos:
+
+```text
+CATALOG_SOURCE=memory
+```
 
 ## Render
 
@@ -324,18 +332,17 @@ Funcional:
 - Frontend Vue corre localmente.
 - Backend Spring Boot corre localmente.
 - Frontend se conecta al backend.
-- Backend responde con mocks.
+- Backend valida con lexer basico, parser SQL basico y analisis semantico inicial.
 - Tests del backend pasan.
 - Build del frontend funciona.
 - Base PostgreSQL de Render creada para integracion posterior.
 
 Pendiente:
 
-- Conectar backend a PostgreSQL.
-- Crear servicio de catalogo real.
-- Integrar Lexer real.
-- Integrar Parser real.
-- Integrar Analisis Semantico real.
+- Probar el catalogo PostgreSQL con credenciales de Render por variables de entorno.
+- Ampliar Lexer real.
+- Ampliar Parser real.
+- Ampliar Analisis Semantico real.
 - Desplegar backend y frontend en Render.
 
 ## Responsabilidades futuras del equipo

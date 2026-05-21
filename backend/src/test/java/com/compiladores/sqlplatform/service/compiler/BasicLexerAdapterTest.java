@@ -7,9 +7,9 @@ import com.compiladores.sqlplatform.model.TokenInfo;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class MockLexerAdapterTest {
+class BasicLexerAdapterTest {
 
-    private final LexerPort lexer = new MockLexerAdapter();
+    private final LexerPort lexer = new BasicLexerAdapter();
 
     @Test
     void tokenizesGenericSqlWithOperatorsSymbolsAndPositions() {
