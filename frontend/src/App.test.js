@@ -123,6 +123,7 @@ describe('App', () => {
 
     expect(wrapper.find('.primary-button').attributes('disabled')).toBeDefined()
     expect(wrapper.find('.secondary-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.loader-overlay').exists()).toBe(true)
 
     resolveValidation({
       success: true,
@@ -137,6 +138,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.find('.primary-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.loader-overlay').exists()).toBe(false)
   })
 
   it('restaura el modo oscuro guardado', () => {

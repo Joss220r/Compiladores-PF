@@ -167,6 +167,13 @@ function shortQuery(value) {
 
 <template>
   <main class="app-shell">
+    <div v-if="loading" class="loader-overlay" role="status" aria-live="polite">
+      <div class="loader-box">
+        <img src="/loading.gif" alt="" />
+        <span>Validando query...</span>
+      </div>
+    </div>
+
     <nav class="view-tabs" aria-label="Vistas">
       <button type="button" :class="{ active: activeView === 'validator' }" @click="showValidator">
         Validador
