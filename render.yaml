@@ -9,6 +9,12 @@ services:
         value: postgres
       - key: CORS_ALLOWED_ORIGINS
         value: https://sql-platform-frontend.onrender.com
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_USERNAME
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
 
   - type: web
     name: sql-platform-frontend
