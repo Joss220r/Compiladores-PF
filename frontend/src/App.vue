@@ -1,6 +1,8 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { validateQuery } from './services/queryValidationApi'
+
+const THEME_STORAGE_KEY = 'sql-platform-theme'
 
 const engines = [
   { label: 'NoSQL', value: 'NOSQL' },
@@ -16,7 +18,7 @@ const query = ref('')
 const result = ref(null)
 const errorMessage = ref('')
 const loading = ref(false)
-const theme = ref('light')
+const theme = ref(getStoredTheme())
 const queryInput = ref(null)
 
 const resultClass = computed(() => {
@@ -30,17 +32,27 @@ const resultClass = computed(() => {
 const groupedErrors = computed(() => groupIssues(result.value?.errors || []))
 const groupedWarnings = computed(() => groupIssues(result.value?.warnings || []))
 
-onMounted(() => {
-  const savedTheme = localStorage.getItem('sql-platform-theme')
-  if (savedTheme === 'dark' || savedTheme === 'light') {
-    theme.value = savedTheme
-  }
-})
-
 watch(theme, (value) => {
   document.documentElement.dataset.theme = value
-  localStorage.setItem('sql-platform-theme', value)
+  saveStoredTheme(value)
 }, { immediate: true })
+
+function getStoredTheme() {
+  try {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY)
+    return savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : 'light'
+  } catch {
+    return 'light'
+  }
+}
+
+function saveStoredTheme(value) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, value)
+  } catch {
+    // The theme still changes visually if storage is blocked by the browser.
+  }
+}
 
 function groupIssues(issues) {
   return issues.reduce((groups, issue) => {

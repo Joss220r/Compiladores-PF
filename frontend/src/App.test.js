@@ -1,5 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import { validateQuery } from './services/queryValidationApi'
 
@@ -12,6 +12,12 @@ function mountApp() {
 }
 
 describe('App', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    delete document.documentElement.dataset.theme
+  })
+
   it('renderiza lista de errores y warnings por fase', async () => {
     validateQuery.mockResolvedValueOnce({
       success: false,
@@ -129,5 +135,14 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.find('.primary-button').attributes('disabled')).toBeUndefined()
+  })
+
+  it('restaura el modo oscuro guardado', () => {
+    localStorage.setItem('sql-platform-theme', 'dark')
+
+    const wrapper = mountApp()
+
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(wrapper.find('.theme-toggle').attributes('aria-pressed')).toBe('true')
   })
 })
