@@ -325,31 +325,3 @@ http://localhost:5173
 SELECT * FROM usuarios WHERE edad > 18;
 ```
 
-## Estado actual
-
-Funcional:
-
-- Frontend Vue corre localmente.
-- Backend Spring Boot corre localmente.
-- Frontend se conecta al backend.
-- Backend valida con lexer basico, parser SQL basico y analisis semantico inicial.
-- Tests del backend pasan.
-- Build del frontend funciona.
-- Base PostgreSQL de Render creada para integracion posterior.
-
-Pendiente:
-
-- Probar el catalogo PostgreSQL con credenciales de Render por variables de entorno.
-- Ampliar Lexer real.
-- Ampliar Parser real.
-- Ampliar Analisis Semantico real.
-- Desplegar backend y frontend en Render.
-
-## Responsabilidades futuras del equipo
-
-- Andre: Lexer real.
-- Ademar: Parser real.
-- Hugo: Analisis semantico real.
-- Jose: Backend, frontend, DB, integracion y despliegue.
-
-Cada modulo debe integrarse respetando las interfaces existentes para evitar romper la demo web.
