@@ -22,7 +22,7 @@ public class DialectValidationService {
     }
 
     private void validateWrongEngine(String trimmed, String upper, DatabaseEngine engine, List<ValidationIssue> issues) {
-        boolean looksSql = upper.matches("^(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP)\\b.*");
+        boolean looksSql = looksSqlQuery(upper);
         boolean looksMongo = trimmed.matches("(?is)^db\\.[a-zA-Z_][\\w]*\\.[a-zA-Z_][\\w]*\\s*\\(.*");
         boolean looksRedis = upper.matches("^(GET|SET|DEL|EXISTS|EXPIRE|TTL|HSET|HGET|HGETALL|LPUSH|RPUSH|LPOP|RPOP|SADD|SMEMBERS)\\b.*");
 
@@ -33,11 +33,20 @@ public class DialectValidationService {
             issues.add(error("Esta consulta parece SQL, pero el motor seleccionado es Redis.", 1, 1, firstWord(trimmed)));
         }
         if (isRelational(engine) && looksMongo) {
-            issues.add(error("Esta consulta parece MongoDB, pero el motor seleccionado es " + engine.name() + ".", 1, 1, "db."));
+            issues.add(error("Esta consulta parece MongoDB, pero el motor seleccionado es " + displayName(engine) + ".", 1, 1, "db."));
         }
         if (isRelational(engine) && looksRedis && !upper.startsWith("SELECT")) {
-            issues.add(error("Esta consulta parece Redis, pero el motor seleccionado es " + engine.name() + ".", 1, 1, firstWord(trimmed)));
+            issues.add(error("Esta consulta parece Redis, pero el motor seleccionado es " + displayName(engine) + ".", 1, 1, firstWord(trimmed)));
         }
+    }
+
+    private boolean looksSqlQuery(String upper) {
+        return upper.matches("(?is)^SELECT\\b.*")
+                || upper.matches("(?is)^INSERT\\s+INTO\\b.*")
+                || upper.matches("(?is)^UPDATE\\s+[a-zA-Z_][\\w]*\\s+SET\\b.*")
+                || upper.matches("(?is)^DELETE\\s+FROM\\b.*")
+                || upper.matches("(?is)^CREATE\\s+TABLE\\b.*")
+                || upper.matches("(?is)^DROP\\s+TABLE\\b.*");
     }
 
     private void validateSqlDialect(String upper, DatabaseEngine engine, List<ValidationIssue> issues) {
@@ -88,5 +97,17 @@ public class DialectValidationService {
             return "";
         }
         return query.trim().split("\\s+")[0];
+    }
+
+    private String displayName(DatabaseEngine engine) {
+        return switch (engine) {
+            case SQL -> "SQL";
+            case MYSQL -> "MySQL";
+            case POSTGRESQL -> "PostgreSQL";
+            case SQL_SERVER -> "SQL Server";
+            case MONGODB -> "MongoDB";
+            case REDIS -> "Redis";
+            case NOSQL -> "NoSQL";
+        };
     }
 }

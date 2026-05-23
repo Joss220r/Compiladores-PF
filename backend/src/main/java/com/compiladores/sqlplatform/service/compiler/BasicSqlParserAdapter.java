@@ -123,9 +123,12 @@ public class BasicSqlParserAdapter implements ParserPort {
             parserIssues.add(issue("Operacion MongoDB no soportada: " + operation + ".", 1, query.indexOf(operation) + 1, operation));
         }
         if ((operation.equals("updateOne") || operation.equals("updateMany")) && arguments.size() != 2) {
-            parserIssues.add(issue(operation + " requiere filtro y actualizacion.", 1, query.indexOf(operation) + 1, operation));
+            parserIssues.add(issue(operation + " requiere filtro y actualización.", 1, query.indexOf(operation) + 1, operation));
         }
-        if ((operation.equals("find") || operation.equals("insertOne") || operation.equals("deleteOne")
+        if (operation.equals("find") && arguments.size() > 1) {
+            parserIssues.add(issue(operation + " recibe como maximo un filtro.", 1, query.indexOf(operation) + 1, operation));
+        }
+        if ((operation.equals("insertOne") || operation.equals("deleteOne")
                 || operation.equals("deleteMany")) && arguments.size() != 1) {
             parserIssues.add(issue(operation + " requiere exactamente un argumento.", 1, query.indexOf(operation) + 1, operation));
         }
@@ -169,11 +172,11 @@ public class BasicSqlParserAdapter implements ParserPort {
         if (minArgs == null) {
             parserIssues.add(issue("Comando Redis no soportado: " + command + ".", commandToken.getLine(), commandToken.getColumn(), commandToken.getLexeme()));
         } else if (arguments.size() < minArgs) {
-            parserIssues.add(issue("El comando " + command + " requiere al menos " + minArgs + " argumento(s).",
+            parserIssues.add(issue(redisArgumentMessage(command, minArgs),
                     commandToken.getLine(), commandToken.getColumn(), commandToken.getLexeme()));
         }
         if ("EXPIRE".equals(command) && arguments.size() >= 2 && !arguments.get(1).matches("\\d+")) {
-            parserIssues.add(issue("EXPIRE requiere segundos numericos.", 1, query.indexOf(arguments.get(1)) + 1, arguments.get(1)));
+            parserIssues.add(issue("EXPIRE requiere segundos numéricos.", 1, query.indexOf(arguments.get(1)) + 1, arguments.get(1)));
         }
 
         attributes.put("parserStatus", parserIssues.isEmpty() ? "BASIC_REDIS_PARSER" : PARSER_ERROR);
@@ -186,6 +189,27 @@ public class BasicSqlParserAdapter implements ParserPort {
                         .map(argument -> tokenNode("Argument", new SqlToken("ARGUMENT", argument, 1, query.indexOf(argument) + 1)))
                         .toList())
         ));
+    }
+
+    private String redisArgumentMessage(String command, int minArgs) {
+        return switch (command) {
+            case "SET" -> "El comando SET requiere key y value.";
+            case "GET" -> "El comando GET requiere key.";
+            case "DEL" -> "El comando DEL requiere key.";
+            case "EXISTS" -> "El comando EXISTS requiere key.";
+            case "EXPIRE" -> "El comando EXPIRE requiere key y seconds.";
+            case "TTL" -> "El comando TTL requiere key.";
+            case "HSET" -> "El comando HSET requiere key, field y value.";
+            case "HGET" -> "El comando HGET requiere key y field.";
+            case "HGETALL" -> "El comando HGETALL requiere key.";
+            case "LPUSH" -> "El comando LPUSH requiere key y value.";
+            case "RPUSH" -> "El comando RPUSH requiere key y value.";
+            case "LPOP" -> "El comando LPOP requiere key.";
+            case "RPOP" -> "El comando RPOP requiere key.";
+            case "SADD" -> "El comando SADD requiere key y member.";
+            case "SMEMBERS" -> "El comando SMEMBERS requiere key.";
+            default -> "El comando " + command + " requiere al menos " + minArgs + " argumento(s).";
+        };
     }
 
     private AstNode parseStatement(ParserState state, List<String> errors) {

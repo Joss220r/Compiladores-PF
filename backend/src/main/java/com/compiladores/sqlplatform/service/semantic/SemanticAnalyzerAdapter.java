@@ -193,7 +193,12 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         switch (operation) {
-            case "find", "deleteOne", "deleteMany" -> {
+            case "find" -> {
+                if (arguments.size() > 1 || (arguments.size() == 1 && !looksLikeObject(arguments.get(0)))) {
+                    errors.add("find debe recibir un filtro opcional en forma de objeto.");
+                }
+            }
+            case "deleteOne", "deleteMany" -> {
                 if (arguments.size() != 1 || !looksLikeObject(arguments.get(0))) {
                     errors.add(operation + " debe recibir un filtro en forma de objeto.");
                 }
@@ -220,7 +225,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
                     errors.add(operation + " debe recibir una actualizacion en forma de objeto.");
                 }
                 if (arguments.get(1).matches("(?is).*\\bset\\s*:.*") && !arguments.get(1).contains("$set")) {
-                    errors.add("En MongoDB usa $set, no set, dentro de la actualizacion.");
+                    errors.add("En MongoDB el operador correcto es $set, no set.");
                 }
                 if (!containsAny(arguments.get(1), "$set", "$gt", "$lt", "$gte", "$lte", "$in")) {
                     warnings.add(operation + " no usa operadores MongoDB reconocidos como $set.");
@@ -238,11 +243,11 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         switch (command) {
             case "SET" -> requireArgumentCount(command, arguments, 2, errors);
-            case "GET", "DEL", "TTL" -> requireArgumentCount(command, arguments, 1, errors);
+            case "GET", "DEL", "EXISTS", "TTL" -> requireArgumentCount(command, arguments, 1, errors);
             case "EXPIRE" -> {
                 requireArgumentCount(command, arguments, 2, errors);
                 if (arguments.size() >= 2 && !arguments.get(1).matches("\\d+")) {
-                    errors.add("EXPIRE requiere segundos numericos.");
+                    errors.add("EXPIRE requiere segundos numéricos.");
                 }
             }
             case "HSET" -> requireArgumentCount(command, arguments, 3, errors);

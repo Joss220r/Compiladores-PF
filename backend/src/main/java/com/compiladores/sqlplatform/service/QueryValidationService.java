@@ -83,7 +83,7 @@ public class QueryValidationService {
                 request.getEngine(),
                 issues
         );
-        boolean valid = errors.isEmpty() && (semanticResult == null || semanticResult.isValid());
+        boolean valid = errors.isEmpty();
         String message = valid
                 ? "Query validada por Lexer, Parser y Analisis Semantico."
                 : "La query contiene errores.";

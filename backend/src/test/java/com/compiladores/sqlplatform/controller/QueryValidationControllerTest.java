@@ -141,6 +141,28 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQueryRejectsSqlUpdateWhenRedisEngineSelected() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "UPDATE usuarios SET nombre = 'Carlos';"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].phase").value("DIALECT"))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece SQL, pero el motor seleccionado es Redis."))
+                .andExpect(jsonPath("$.warnings", hasSize(0)))
+                .andExpect(jsonPath("$.ast").doesNotExist())
+                .andExpect(jsonPath("$.semanticResult").doesNotExist());
+    }
+
+    @Test
     void validateQueryRejectsIncompatibleWhereTypes() throws Exception {
         String request = """
                 {
@@ -376,6 +398,23 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQueryAcceptsMongoFindWithoutFilter() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.find()"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(0)))
+                .andExpect(jsonPath("$.ast.attributes.operation").value("find"))
+                .andExpect(jsonPath("$.ast.attributes.collection").value("usuarios"));
+    }
+
+    @Test
     void validateQueryAcceptsMongoInsertOneWithoutSemanticWarnings() throws Exception {
         String request = """
                 {
@@ -507,6 +546,66 @@ class QueryValidationControllerTest {
                   "engine": "REDIS",
                   "query": "HSET usuario:1 nombre \\"Jose\\""
                 }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "EXISTS usuario:1"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "TTL usuario:1"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "HGET usuario:1 nombre"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "HGETALL usuario:1"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "LPUSH cola \\"valor\\""
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "RPUSH cola \\"valor\\""
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "LPOP cola"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "RPOP cola"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "SADD conjunto miembro"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "SMEMBERS conjunto"
+                }
                 """
         };
 
@@ -531,6 +630,37 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.warnings", hasSize(0)));
+    }
+
+    @Test
+    void validateQueryAcceptsMongoSupportedOperationsWithoutSemanticWarnings() throws Exception {
+        String[] requests = {
+                """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.insertMany([{ nombre: \\"Jose\\" }, { nombre: \\"Carlos\\" }])"
+                }
+                """,
+                """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateMany({ activo: true }, { $set: { estado: \\"ok\\" } })"
+                }
+                """,
+                """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.deleteMany({ activo: false })"
+                }
+                """
+        };
+
+        for (String request : requests) {
+            mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.warnings", hasSize(0)));
+        }
     }
 
     @Test
@@ -592,7 +722,7 @@ class QueryValidationControllerTest {
         mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.errors[0].message", containsString("segundos numericos")));
+                .andExpect(jsonPath("$.errors[0].message", containsString("segundos")));
     }
 
     @Test
@@ -656,5 +786,174 @@ class QueryValidationControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.suggestions[0].title", containsString("comilla")))
                 .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SELECT * FROM usuarios WHERE nombre = 'Jose';"));
+    }
+
+    @Test
+    void redisDoesNotAcceptSqlDelete() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "DELETE FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece SQL, pero el motor seleccionado es Redis."))
+                .andExpect(jsonPath("$.warnings", hasSize(0)));
+    }
+
+    @Test
+    void redisDoesNotAcceptSqlSelect() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "SELECT * FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("La query contiene errores."))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece SQL, pero el motor seleccionado es Redis."));
+    }
+
+    @Test
+    void redisSetIncompleteUsesClearMessage() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "SET usuario:1"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("El comando SET requiere key y value."));
+    }
+
+    @Test
+    void redisExpireWithNonNumericSecondsUsesClearMessage() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "EXPIRE usuario:1 abc"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("EXPIRE requiere segundos numéricos."));
+    }
+
+    @Test
+    void redisUnknownCommandIsInvalid() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "UPDATE usuario:1 \\"Jose\\""
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Comando Redis no soportado: UPDATE."));
+    }
+
+    @Test
+    void mongodbUpdateOneIncompleteUsesClearMessage() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateOne({ id: 1 })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("updateOne requiere filtro y actualización."));
+    }
+
+    @Test
+    void mongodbSetWithoutDollarIncludesSuggestion() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateOne({ id: 1 }, { set: { nombre: \\"Carlos\\" } })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("En MongoDB el operador correcto es $set, no set."))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery")
+                        .value("db.usuarios.updateOne({ id: 1 }, { $set: { nombre: \"Carlos\" } })"));
+    }
+
+    @Test
+    void genericSqlDoesNotAcceptRedisSyntax() throws Exception {
+        String request = """
+                {
+                  "engine": "SQL",
+                  "query": "SET usuario:1 \\"Jose\\""
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece Redis, pero el motor seleccionado es SQL."));
+    }
+
+    @Test
+    void mysqlDoesNotAcceptMongoSyntax() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "db.usuarios.find({ nombre: \\"Jose\\" })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece MongoDB, pero el motor seleccionado es MySQL."));
+    }
+
+    @Test
+    void sqlServerDoesNotAcceptMongoSyntax() throws Exception {
+        String request = """
+                {
+                  "engine": "SQL_SERVER",
+                  "query": "db.usuarios.find({ nombre: \\"Jose\\" })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece MongoDB, pero el motor seleccionado es SQL Server."));
+    }
+
+    @Test
+    void mongodbDoesNotAcceptSqlSyntax() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "SELECT * FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece SQL, pero el motor seleccionado es MongoDB."));
     }
 }
