@@ -40,21 +40,34 @@ public class QueryValidationService {
         List<TokenInfo> tokens = lexer.tokenize(normalizedQuery, request.getEngine());
         issues.addAll(lexer.getIssues());
         issues.addAll(dialectValidationService.validate(normalizedQuery, request.getEngine()));
+
+        boolean hasBlockingDialectError = issues.stream()
+                .anyMatch(issue -> "DIALECT".equals(issue.getPhase()) && "ERROR".equals(issue.getSeverity()));
+        if (hasBlockingDialectError) {
+            return buildResponse(request, issues, tokens, null, null);
+        }
+
         AstNode ast = parser.parse(tokens, normalizedQuery, request.getEngine());
         issues.addAll(parser.getIssues());
         SemanticResult semanticResult = null;
 
-        boolean hasBlockingDialectError = issues.stream()
-                .anyMatch(issue -> "DIALECT".equals(issue.getPhase()) && "ERROR".equals(issue.getSeverity()));
-        if (!hasBlockingDialectError) {
-            semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
-            issues.addAll(semanticAnalyzer.getIssues());
-        }
+        semanticResult = semanticAnalyzer.analyze(ast, request.getEngine());
+        issues.addAll(semanticAnalyzer.getIssues());
 
         if (normalizedQuery.isBlank()) {
             issues.add(ValidationIssue.error("PARSER", "La query no puede estar vacia.", 1, 1, ""));
         }
 
+        return buildResponse(request, issues, tokens, ast, semanticResult);
+    }
+
+    private QueryValidationResponse buildResponse(
+            QueryValidationRequest request,
+            List<ValidationIssue> issues,
+            List<TokenInfo> tokens,
+            AstNode ast,
+            SemanticResult semanticResult
+    ) {
         List<ValidationIssue> errors = issues.stream()
                 .filter(issue -> "ERROR".equals(issue.getSeverity()))
                 .toList();

@@ -233,6 +233,40 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQueryRejectsPostgresqlAutoIncrementInCompleteCreateTable() throws Exception {
+        String request = """
+                {
+                  "engine": "POSTGRESQL",
+                  "query": "CREATE TABLE usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(100));"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].phase").value("DIALECT"))
+                .andExpect(jsonPath("$.errors[0].message", containsString("AUTO_INCREMENT")));
+    }
+
+    @Test
+    void validateQueryRejectsMysqlSerialInCompleteCreateTable() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "CREATE TABLE usuarios (id SERIAL PRIMARY KEY, nombre VARCHAR(100));"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].phase").value("DIALECT"))
+                .andExpect(jsonPath("$.errors[0].message", containsString("SERIAL")));
+    }
+
+    @Test
     void validateQueryRejectsSqlServerLimit() throws Exception {
         String request = """
                 {
@@ -248,6 +282,24 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQueryRejectsSqlServerLimitWithOnlyDialectError() throws Exception {
+        String request = """
+                {
+                  "engine": "SQL_SERVER",
+                  "query": "SELECT * FROM usuarios LIMIT 10;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].phase").value("DIALECT"))
+                .andExpect(jsonPath("$.errors[0].message", containsString("LIMIT no es valido")))
+                .andExpect(jsonPath("$.semanticResult").doesNotExist());
+    }
+
+    @Test
     void validateQueryAcceptsMongoFind() throws Exception {
         String request = """
                 {
@@ -260,6 +312,36 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.ast.type").value("MongoQuery"));
+    }
+
+    @Test
+    void validateQueryAcceptsMongoInsertOneWithoutSemanticWarnings() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.insertOne({ nombre: \\"Jose\\", edad: 20 })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(0)));
+    }
+
+    @Test
+    void validateQueryAcceptsMongoDeleteOneWithoutSemanticWarnings() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.deleteOne({ id: 1 })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(0)));
     }
 
     @Test
@@ -321,6 +403,43 @@ class QueryValidationControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.warnings", hasSize(0)))
                 .andExpect(jsonPath("$.ast.type").value("RedisCommand"));
+    }
+
+    @Test
+    void validateQueryAcceptsRedisCommonCommandsWithoutSemanticWarnings() throws Exception {
+        String[] requests = {
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "GET usuario:1"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "DEL usuario:1"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "EXPIRE usuario:1 3600"
+                }
+                """,
+                """
+                {
+                  "engine": "REDIS",
+                  "query": "HSET usuario:1 nombre \\"Jose\\""
+                }
+                """
+        };
+
+        for (String request : requests) {
+            mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.warnings", hasSize(0)));
+        }
     }
 
     @Test

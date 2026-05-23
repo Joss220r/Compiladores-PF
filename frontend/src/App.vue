@@ -13,7 +13,7 @@ const engines = [
   { label: 'Redis', value: 'REDIS' }
 ]
 
-const selectedEngine = ref('SQL')
+const selectedEngine = ref('MYSQL')
 const query = ref('')
 const result = ref(null)
 const errorMessage = ref('')
