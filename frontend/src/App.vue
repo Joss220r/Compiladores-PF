@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { validateQuery } from './services/queryValidationApi'
+import { fetchHistory, fetchHistoryStats, validateQuery } from './services/queryValidationApi'
 
 const THEME_STORAGE_KEY = 'sql-platform-theme'
 
@@ -20,6 +20,11 @@ const errorMessage = ref('')
 const loading = ref(false)
 const theme = ref(getStoredTheme())
 const queryInput = ref(null)
+const activeView = ref('validator')
+const dashboardLoading = ref(false)
+const dashboardError = ref('')
+const dashboardStats = ref(null)
+const dashboardItems = ref([])
 
 const resultClass = computed(() => {
   if (!result.value) {
@@ -115,11 +120,63 @@ function applySuggestion(fixedQuery) {
     queryInput.value?.focus()
   })
 }
+
+async function showDashboard() {
+  activeView.value = 'dashboard'
+  await loadDashboard()
+}
+
+function showValidator() {
+  activeView.value = 'validator'
+}
+
+async function loadDashboard() {
+  dashboardLoading.value = true
+  dashboardError.value = ''
+
+  try {
+    const [stats, history] = await Promise.all([
+      fetchHistoryStats(),
+      fetchHistory(20)
+    ])
+    dashboardStats.value = stats
+    dashboardItems.value = history.items || []
+  } catch (error) {
+    dashboardError.value = error.message || 'No se pudo cargar el historial.'
+    dashboardStats.value = null
+    dashboardItems.value = []
+  } finally {
+    dashboardLoading.value = false
+  }
+}
+
+function formatDate(value) {
+  if (!value) {
+    return '-'
+  }
+  return new Date(value).toLocaleString()
+}
+
+function shortQuery(value) {
+  if (!value) {
+    return ''
+  }
+  return value.length > 90 ? `${value.slice(0, 90)}...` : value
+}
 </script>
 
 <template>
   <main class="app-shell">
-    <section class="workspace">
+    <nav class="view-tabs" aria-label="Vistas">
+      <button type="button" :class="{ active: activeView === 'validator' }" @click="showValidator">
+        Validador
+      </button>
+      <button type="button" :class="{ active: activeView === 'dashboard' }" @click="showDashboard">
+        Dashboard
+      </button>
+    </nav>
+
+    <section v-if="activeView === 'validator'" class="workspace">
       <div class="editor-panel">
         <div class="title-row">
           <div>
@@ -258,6 +315,83 @@ function applySuggestion(fixedQuery) {
         <div v-else class="empty-state">
           Ejecuta una validacion para ver la respuesta del backend.
         </div>
+      </div>
+    </section>
+
+    <section v-else class="dashboard-panel">
+      <div class="panel-header">
+        <h2>Dashboard</h2>
+        <button class="secondary-button refresh-button" type="button" :disabled="dashboardLoading" @click="loadDashboard">
+          Actualizar
+        </button>
+      </div>
+
+      <div v-if="dashboardLoading" class="empty-state">
+        Cargando historial...
+      </div>
+
+      <div v-else-if="dashboardError" class="error-box">
+        {{ dashboardError }}
+      </div>
+
+      <div v-else>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span>Total de consultas</span>
+            <strong>{{ dashboardStats?.total || 0 }}</strong>
+          </div>
+          <div class="stat-card">
+            <span>Consultas validas</span>
+            <strong>{{ dashboardStats?.valid || 0 }}</strong>
+          </div>
+          <div class="stat-card">
+            <span>Consultas invalidas</span>
+            <strong>{{ dashboardStats?.invalid || 0 }}</strong>
+          </div>
+          <div class="stat-card">
+            <span>Warnings</span>
+            <strong>{{ dashboardStats?.warningTotal || 0 }}</strong>
+          </div>
+          <div class="stat-card">
+            <span>Motor mas usado</span>
+            <strong>{{ dashboardStats?.mostUsedEngine || '-' }}</strong>
+          </div>
+        </div>
+
+        <section class="result-section">
+          <h3>Ultimas consultas</h3>
+          <div v-if="!dashboardItems.length" class="empty-state">
+            No hay consultas analizadas todavía.
+          </div>
+          <div v-else class="history-table-wrap">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Motor</th>
+                  <th>Estado</th>
+                  <th>Errores</th>
+                  <th>Warnings</th>
+                  <th>Query</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in dashboardItems" :key="item.id">
+                  <td>{{ formatDate(item.createdAt) }}</td>
+                  <td>{{ item.engine }}</td>
+                  <td>
+                    <span class="result-badge" :class="item.valid ? 'result-ok' : 'result-error'">
+                      {{ item.valid ? 'Valida' : 'Invalida' }}
+                    </span>
+                  </td>
+                  <td>{{ item.errorCount }}</td>
+                  <td>{{ item.warningCount }}</td>
+                  <td class="query-cell" :title="item.originalQuery">{{ shortQuery(item.originalQuery) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </section>
   </main>

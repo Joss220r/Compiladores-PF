@@ -6,15 +6,21 @@ services:
     plan: free
     envVars:
       - key: CATALOG_SOURCE
-        value: postgres
+        value: memory
       - key: CORS_ALLOWED_ORIGINS
         value: https://sql-platform-frontend.onrender.com
-      - key: DATABASE_URL
+      - key: DB_HOST
         sync: false
-      - key: DATABASE_USERNAME
+      - key: DB_PORT
+        value: 5432
+      - key: DB_NAME
         sync: false
-      - key: DATABASE_PASSWORD
+      - key: DB_USER
         sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL
+        value: require
 
   - type: web
     name: sql-platform-frontend

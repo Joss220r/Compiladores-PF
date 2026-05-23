@@ -1,9 +1,11 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
-import { validateQuery } from './services/queryValidationApi'
+import { fetchHistory, fetchHistoryStats, validateQuery } from './services/queryValidationApi'
 
 vi.mock('./services/queryValidationApi', () => ({
+  fetchHistory: vi.fn(),
+  fetchHistoryStats: vi.fn(),
   validateQuery: vi.fn()
 }))
 
@@ -187,5 +189,73 @@ describe('App', () => {
     await wrapper.find('.apply-button').trigger('click')
 
     expect(wrapper.find('textarea').element.value).toBe('SELECT * FROM usuarios LIMIT 10;')
+  })
+
+  it('dashboard carga estadisticas', async () => {
+    fetchHistoryStats.mockResolvedValueOnce({
+      success: true,
+      total: 3,
+      valid: 2,
+      invalid: 1,
+      warningTotal: 1,
+      mostUsedEngine: 'MYSQL',
+      byEngine: [],
+      topErrors: []
+    })
+    fetchHistory.mockResolvedValueOnce({ success: true, items: [] })
+
+    const wrapper = mountApp()
+    await wrapper.findAll('.view-tabs button')[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Total de consultas')
+    expect(wrapper.text()).toContain('MYSQL')
+    expect(wrapper.text()).toContain('No hay consultas analizadas todavía.')
+  })
+
+  it('dashboard muestra tabla de ultimas consultas y corta query larga', async () => {
+    fetchHistoryStats.mockResolvedValueOnce({
+      success: true,
+      total: 1,
+      valid: 1,
+      invalid: 0,
+      warningTotal: 0,
+      mostUsedEngine: 'POSTGRESQL',
+      byEngine: [],
+      topErrors: []
+    })
+    fetchHistory.mockResolvedValueOnce({
+      success: true,
+      items: [
+        {
+          id: '123',
+          engine: 'POSTGRESQL',
+          originalQuery: 'SELECT nombre, edad, correo, direccion, telefono, estado, fecha_creacion FROM usuarios WHERE edad >= 18;',
+          valid: true,
+          errorCount: 0,
+          warningCount: 0,
+          createdAt: '2026-05-22T10:00:00'
+        }
+      ]
+    })
+
+    const wrapper = mountApp()
+    await wrapper.findAll('.view-tabs button')[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.history-table').exists()).toBe(true)
+    expect(wrapper.text()).toContain('POSTGRESQL')
+    expect(wrapper.text()).toContain('...')
+  })
+
+  it('dashboard muestra error si falla la carga', async () => {
+    fetchHistoryStats.mockRejectedValueOnce(new Error('No se pudo cargar el historial.'))
+    fetchHistory.mockResolvedValueOnce({ success: true, items: [] })
+
+    const wrapper = mountApp()
+    await wrapper.findAll('.view-tabs button')[1].trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('No se pudo cargar el historial.')
   })
 })

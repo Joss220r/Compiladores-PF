@@ -12,29 +12,36 @@ import com.compiladores.sqlplatform.service.compiler.ParserPort;
 import com.compiladores.sqlplatform.service.compiler.SemanticAnalyzerPort;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class QueryValidationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(QueryValidationService.class);
 
     private final LexerPort lexer;
     private final ParserPort parser;
     private final SemanticAnalyzerPort semanticAnalyzer;
     private final DialectValidationService dialectValidationService;
     private final CorrectionSuggestionService correctionSuggestionService;
+    private final QueryHistoryService queryHistoryService;
 
     public QueryValidationService(
             LexerPort lexer,
             ParserPort parser,
             SemanticAnalyzerPort semanticAnalyzer,
             DialectValidationService dialectValidationService,
-            CorrectionSuggestionService correctionSuggestionService
+            CorrectionSuggestionService correctionSuggestionService,
+            QueryHistoryService queryHistoryService
     ) {
         this.lexer = lexer;
         this.parser = parser;
         this.semanticAnalyzer = semanticAnalyzer;
         this.dialectValidationService = dialectValidationService;
         this.correctionSuggestionService = correctionSuggestionService;
+        this.queryHistoryService = queryHistoryService;
     }
 
     public QueryValidationResponse validate(QueryValidationRequest request) {
@@ -48,7 +55,9 @@ public class QueryValidationService {
         boolean hasBlockingDialectError = issues.stream()
                 .anyMatch(issue -> "DIALECT".equals(issue.getPhase()) && "ERROR".equals(issue.getSeverity()));
         if (hasBlockingDialectError) {
-            return buildResponse(request, issues, tokens, null, null);
+            QueryValidationResponse response = buildResponse(request, issues, tokens, null, null);
+            saveHistorySafely(request, response);
+            return response;
         }
 
         AstNode ast = parser.parse(tokens, normalizedQuery, request.getEngine());
@@ -62,7 +71,9 @@ public class QueryValidationService {
             issues.add(ValidationIssue.error("PARSER", "La query no puede estar vacia.", 1, 1, ""));
         }
 
-        return buildResponse(request, issues, tokens, ast, semanticResult);
+        QueryValidationResponse response = buildResponse(request, issues, tokens, ast, semanticResult);
+        saveHistorySafely(request, response);
+        return response;
     }
 
     private QueryValidationResponse buildResponse(
@@ -100,5 +111,13 @@ public class QueryValidationService {
                 null,
                 suggestions
         );
+    }
+
+    private void saveHistorySafely(QueryValidationRequest request, QueryValidationResponse response) {
+        try {
+            queryHistoryService.saveAnalysis(request.getEngine().name(), request.getQuery(), response);
+        } catch (Exception exception) {
+            LOGGER.warn("No se pudo guardar historial de consulta", exception);
+        }
     }
 }

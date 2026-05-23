@@ -1,7 +1,9 @@
 package com.compiladores.sqlplatform.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,6 +27,140 @@ class QueryValidationControllerTest {
     void healthEndpointReturnsOk() throws Exception {
         mockMvc.perform(get("/api/health"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void historyStoresValidAnalysis() throws Exception {
+        mockMvc.perform(delete("/api/history")).andExpect(status().isOk());
+
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        mockMvc.perform(get("/api/history?limit=1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].engine").value("MYSQL"))
+                .andExpect(jsonPath("$.items[0].valid").value(true))
+                .andExpect(jsonPath("$.items[0].errorCount").value(0));
+    }
+
+    @Test
+    void historyStoresInvalidAnalysis() throws Exception {
+        mockMvc.perform(delete("/api/history")).andExpect(status().isOk());
+
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios WHERE;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false));
+
+        mockMvc.perform(get("/api/history?limit=1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].valid").value(false))
+                .andExpect(jsonPath("$.items[0].errorCount", greaterThanOrEqualTo(1)));
+    }
+
+    @Test
+    void historyStoresWarningAnalysis() throws Exception {
+        mockMvc.perform(delete("/api/history")).andExpect(status().isOk());
+
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "UPDATE usuarios SET nombre = 'Carlos';"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.warnings", hasSize(1)));
+
+        mockMvc.perform(get("/api/history?limit=1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].valid").value(true))
+                .andExpect(jsonPath("$.items[0].warningCount").value(1));
+    }
+
+    @Test
+    void historyReturnsNewestFirstAndFilters() throws Exception {
+        mockMvc.perform(delete("/api/history")).andExpect(status().isOk());
+
+        String mysqlValid = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios;"
+                }
+                """;
+        String redisInvalid = """
+                {
+                  "engine": "REDIS",
+                  "query": "SET usuario:1"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(mysqlValid))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(redisInvalid))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/history?limit=2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].engine").value("REDIS"));
+
+        mockMvc.perform(get("/api/history?engine=MYSQL"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].engine").value("MYSQL"));
+
+        mockMvc.perform(get("/api/history?success=false"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].valid").value(false));
+    }
+
+    @Test
+    void historyStatsReturnsTotalsAndByEngine() throws Exception {
+        mockMvc.perform(delete("/api/history")).andExpect(status().isOk());
+
+        String mysqlValid = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios;"
+                }
+                """;
+        String redisInvalid = """
+                {
+                  "engine": "REDIS",
+                  "query": "SET usuario:1"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(mysqlValid))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(redisInvalid))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/history/stats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.valid").value(1))
+                .andExpect(jsonPath("$.invalid").value(1))
+                .andExpect(jsonPath("$.byEngine", hasSize(2)));
     }
 
     @Test

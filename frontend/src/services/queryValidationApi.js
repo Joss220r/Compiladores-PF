@@ -32,3 +32,34 @@ export async function validateQuery(payload) {
 
   return data
 }
+
+export async function fetchHistoryStats() {
+  return fetchJson('/api/history/stats')
+}
+
+export async function fetchHistory(limit = 20) {
+  return fetchJson(`/api/history?limit=${limit}`)
+}
+
+async function fetchJson(path) {
+  let response
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`)
+  } catch (error) {
+    throw new Error('No se pudo cargar el historial.', { cause: error })
+  }
+
+  let data = null
+  try {
+    data = await response.json()
+  } catch (error) {
+    data = null
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || 'No se pudo cargar el historial.', { cause: data })
+  }
+
+  return data
+}
