@@ -33,6 +33,7 @@ public class GlobalExceptionHandler {
         body.put("ast", null);
         body.put("semanticResult", null);
         body.put("output", null);
+        body.put("suggestions", List.of());
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
@@ -49,6 +50,7 @@ public class GlobalExceptionHandler {
         body.put("ast", null);
         body.put("semanticResult", null);
         body.put("output", null);
+        body.put("suggestions", List.of());
 
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
     }
@@ -65,6 +67,7 @@ public class GlobalExceptionHandler {
         body.put("ast", null);
         body.put("semanticResult", null);
         body.put("output", null);
+        body.put("suggestions", List.of());
 
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
     }

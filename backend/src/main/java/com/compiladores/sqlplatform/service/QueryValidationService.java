@@ -3,6 +3,7 @@ package com.compiladores.sqlplatform.service;
 import com.compiladores.sqlplatform.dto.QueryValidationRequest;
 import com.compiladores.sqlplatform.dto.QueryValidationResponse;
 import com.compiladores.sqlplatform.model.AstNode;
+import com.compiladores.sqlplatform.model.CorrectionSuggestion;
 import com.compiladores.sqlplatform.model.SemanticResult;
 import com.compiladores.sqlplatform.model.TokenInfo;
 import com.compiladores.sqlplatform.model.ValidationIssue;
@@ -20,17 +21,20 @@ public class QueryValidationService {
     private final ParserPort parser;
     private final SemanticAnalyzerPort semanticAnalyzer;
     private final DialectValidationService dialectValidationService;
+    private final CorrectionSuggestionService correctionSuggestionService;
 
     public QueryValidationService(
             LexerPort lexer,
             ParserPort parser,
             SemanticAnalyzerPort semanticAnalyzer,
-            DialectValidationService dialectValidationService
+            DialectValidationService dialectValidationService,
+            CorrectionSuggestionService correctionSuggestionService
     ) {
         this.lexer = lexer;
         this.parser = parser;
         this.semanticAnalyzer = semanticAnalyzer;
         this.dialectValidationService = dialectValidationService;
+        this.correctionSuggestionService = correctionSuggestionService;
     }
 
     public QueryValidationResponse validate(QueryValidationRequest request) {
@@ -74,6 +78,11 @@ public class QueryValidationService {
         List<ValidationIssue> warnings = issues.stream()
                 .filter(issue -> "WARNING".equals(issue.getSeverity()))
                 .toList();
+        List<CorrectionSuggestion> suggestions = correctionSuggestionService.generate(
+                request.getQuery(),
+                request.getEngine(),
+                issues
+        );
         boolean valid = errors.isEmpty() && (semanticResult == null || semanticResult.isValid());
         String message = valid
                 ? "Query validada por Lexer, Parser y Analisis Semantico."
@@ -88,7 +97,8 @@ public class QueryValidationService {
                 tokens,
                 ast,
                 semanticResult,
-                null
+                null,
+                suggestions
         );
     }
 }

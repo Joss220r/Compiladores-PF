@@ -31,6 +31,7 @@ const resultClass = computed(() => {
 
 const groupedErrors = computed(() => groupIssues(result.value?.errors || []))
 const groupedWarnings = computed(() => groupIssues(result.value?.warnings || []))
+const primarySuggestion = computed(() => result.value?.suggestions?.[0] || null)
 
 watch(theme, (value) => {
   document.documentElement.dataset.theme = value
@@ -84,7 +85,8 @@ async function submitQuery() {
       tokens: [],
       ast: null,
       semanticResult: null,
-      output: null
+      output: null,
+      suggestions: Array.isArray(error.cause?.suggestions) ? error.cause.suggestions : []
     }
   } finally {
     loading.value = false
@@ -102,6 +104,16 @@ function clearForm() {
 
 function toggleTheme() {
   theme.value = theme.value === 'light' ? 'dark' : 'light'
+}
+
+function applySuggestion(fixedQuery) {
+  if (!fixedQuery) {
+    return
+  }
+  query.value = fixedQuery
+  nextTick(() => {
+    queryInput.value?.focus()
+  })
 }
 </script>
 
@@ -203,6 +215,23 @@ function toggleTheme() {
                   </span>
                 </li>
               </ul>
+            </div>
+          </section>
+
+          <section v-if="primarySuggestion" class="result-section suggestion-section">
+            <h3>Sugerencia de corrección</h3>
+            <div class="suggestion-card">
+              <div>
+                <h4>{{ primarySuggestion.title }}</h4>
+                <p>{{ primarySuggestion.explanation }}</p>
+              </div>
+              <span class="suggestion-meta">
+                {{ primarySuggestion.sourcePhase }} · {{ Math.round((primarySuggestion.confidence || 0) * 100) }}%
+              </span>
+              <pre>{{ primarySuggestion.fixedQuery }}</pre>
+              <button class="secondary-button apply-button" type="button" @click="applySuggestion(primarySuggestion.fixedQuery)">
+                Aplicar sugerencia
+              </button>
             </div>
           </section>
 

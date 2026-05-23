@@ -300,6 +300,67 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQuerySuggestsTopForSqlServerLimit() throws Exception {
+        String request = """
+                {
+                  "engine": "SQL_SERVER",
+                  "query": "SELECT * FROM usuarios LIMIT 10;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("LIMIT")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SELECT TOP 10 * FROM usuarios;"))
+                .andExpect(jsonPath("$.suggestions[0].sourcePhase").value("DIALECT"));
+    }
+
+    @Test
+    void validateQuerySuggestsLimitForMysqlTop() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT TOP 10 * FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("TOP")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SELECT * FROM usuarios LIMIT 10;"));
+    }
+
+    @Test
+    void validateQuerySuggestsSerialForPostgresqlAutoIncrement() throws Exception {
+        String request = """
+                {
+                  "engine": "POSTGRESQL",
+                  "query": "CREATE TABLE usuarios (id INT AUTO_INCREMENT PRIMARY KEY, nombre VARCHAR(100));"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("SERIAL")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery", containsString("id SERIAL PRIMARY KEY")));
+    }
+
+    @Test
+    void validateQuerySuggestsAutoIncrementForMysqlSerial() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "CREATE TABLE usuarios (id SERIAL PRIMARY KEY, nombre VARCHAR(100));"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("AUTO_INCREMENT")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery", containsString("id INT AUTO_INCREMENT PRIMARY KEY")));
+    }
+
+    @Test
     void validateQueryAcceptsMongoFind() throws Exception {
         String request = """
                 {
@@ -387,6 +448,21 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errors[0].message", containsString("$set")));
+    }
+
+    @Test
+    void validateQuerySuggestsDollarSetForMongoSet() throws Exception {
+        String request = """
+                {
+                  "engine": "MONGODB",
+                  "query": "db.usuarios.updateOne({ id: 1 }, { set: { nombre: \\"Carlos\\" } })"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("$set")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery", containsString("{ $set:")));
     }
 
     @Test
@@ -490,6 +566,21 @@ class QueryValidationControllerTest {
     }
 
     @Test
+    void validateQuerySuggestsValueForIncompleteRedisSet() throws Exception {
+        String request = """
+                {
+                  "engine": "REDIS",
+                  "query": "SET usuario:1"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("SET")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SET usuario:1 \"valor\""));
+    }
+
+    @Test
     void validateQueryRejectsRedisExpireWithNonNumericSeconds() throws Exception {
         String request = """
                 {
@@ -533,5 +624,37 @@ class QueryValidationControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errors[0].line").value(1))
                 .andExpect(jsonPath("$.errors[0].column").exists());
+    }
+
+    @Test
+    void validateQuerySuggestsConditionForEmptyWhere() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios WHERE;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("WHERE")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SELECT * FROM usuarios WHERE id = 1;"));
+    }
+
+    @Test
+    void validateQuerySuggestsClosingQuote() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT * FROM usuarios WHERE nombre = 'Jose"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.suggestions[0].title", containsString("comilla")))
+                .andExpect(jsonPath("$.suggestions[0].fixedQuery").value("SELECT * FROM usuarios WHERE nombre = 'Jose';"));
     }
 }

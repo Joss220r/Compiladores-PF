@@ -145,4 +145,47 @@ describe('App', () => {
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(wrapper.find('.theme-toggle').attributes('aria-pressed')).toBe('true')
   })
+
+  it('muestra y aplica una sugerencia de correccion', async () => {
+    validateQuery.mockResolvedValueOnce({
+      success: false,
+      message: 'La query contiene errores.',
+      errors: [
+        {
+          phase: 'DIALECT',
+          severity: 'ERROR',
+          message: 'TOP no es valido para MySQL. Usa LIMIT.',
+          line: 1,
+          column: 8,
+          fragment: 'TOP'
+        }
+      ],
+      warnings: [],
+      tokens: [],
+      ast: null,
+      semanticResult: null,
+      output: null,
+      suggestions: [
+        {
+          title: 'Cambiar TOP por LIMIT',
+          explanation: 'MySQL usa LIMIT para limitar resultados.',
+          fixedQuery: 'SELECT * FROM usuarios LIMIT 10;',
+          confidence: 0.95,
+          sourcePhase: 'DIALECT'
+        }
+      ]
+    })
+
+    const wrapper = mountApp()
+    await wrapper.find('textarea').setValue('SELECT TOP 10 * FROM usuarios;')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Sugerencia de corrección')
+    expect(wrapper.text()).toContain('Cambiar TOP por LIMIT')
+
+    await wrapper.find('.apply-button').trigger('click')
+
+    expect(wrapper.find('textarea').element.value).toBe('SELECT * FROM usuarios LIMIT 10;')
+  })
 })

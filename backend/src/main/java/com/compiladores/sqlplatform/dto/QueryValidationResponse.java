@@ -1,6 +1,7 @@
 package com.compiladores.sqlplatform.dto;
 
 import com.compiladores.sqlplatform.model.AstNode;
+import com.compiladores.sqlplatform.model.CorrectionSuggestion;
 import com.compiladores.sqlplatform.model.DatabaseEngine;
 import com.compiladores.sqlplatform.model.SemanticResult;
 import com.compiladores.sqlplatform.model.TokenInfo;
@@ -19,6 +20,7 @@ public class QueryValidationResponse {
     private AstNode ast;
     private SemanticResult semanticResult;
     private Object output;
+    private List<CorrectionSuggestion> suggestions;
 
     public QueryValidationResponse(
             boolean success,
@@ -29,7 +31,8 @@ public class QueryValidationResponse {
             List<TokenInfo> tokens,
             AstNode ast,
             SemanticResult semanticResult,
-            Object output
+            Object output,
+            List<CorrectionSuggestion> suggestions
     ) {
         this.success = success;
         this.valid = success;
@@ -41,6 +44,7 @@ public class QueryValidationResponse {
         this.ast = ast;
         this.semanticResult = semanticResult;
         this.output = output;
+        this.suggestions = suggestions;
     }
 
     public boolean isSuccess() {
@@ -81,5 +85,9 @@ public class QueryValidationResponse {
 
     public Object getOutput() {
         return output;
+    }
+
+    public List<CorrectionSuggestion> getSuggestions() {
+        return suggestions;
     }
 }

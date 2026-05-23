@@ -293,6 +293,34 @@ summary {
   background: var(--warning-bg);
 }
 
+.suggestion-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--field-bg);
+  padding: 14px;
+}
+
+.suggestion-card p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.suggestion-meta {
+  width: fit-content;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.apply-button {
+  width: fit-content;
+}
+
 .issue-group ul {
   display: grid;
   gap: 10px;
