@@ -189,7 +189,7 @@ function shortQuery(value) {
           <div>
             <h1>Validador de querys</h1>
           </div>
-          <button class="theme-toggle" type="button" :aria-pressed="theme === 'dark'" @click="toggleTheme">
+          <button class="theme-toggle" type="button" title="Cambiar tema" :aria-pressed="theme === 'dark'" @click="toggleTheme">
             <span class="toggle-track">
               <span class="toggle-thumb" />
             </span>
@@ -220,7 +220,7 @@ function shortQuery(value) {
 
           <div class="button-row">
             <button class="primary-button" type="submit" :disabled="loading">
-              {{ loading ? 'Validando...' : 'Validar query' }}
+              {{ loading ? 'Analizando...' : 'Analizar query' }}
             </button>
             <button class="secondary-button" type="button" :disabled="loading" @click="clearForm">
               Limpiar
@@ -320,7 +320,7 @@ function shortQuery(value) {
         </div>
 
         <div v-else class="empty-state">
-          Ejecuta una validacion para ver la respuesta del backend.
+          Ejecuta una validacion para ver la respuesta del backend. Los tokens, AST y resultado semantico apareceran despues del analisis.
         </div>
       </div>
     </section>
@@ -368,7 +368,7 @@ function shortQuery(value) {
         <section class="result-section">
           <h3>Ultimas consultas</h3>
           <div v-if="!dashboardItems.length" class="empty-state">
-            No hay consultas analizadas todavía.
+            No hay consultas analizadas todavía. Valida una query para comenzar a generar estadísticas.
           </div>
           <div v-else class="history-table-wrap">
             <table class="history-table">
