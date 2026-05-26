@@ -26,6 +26,46 @@ public class InMemoryCatalogService implements CatalogService {
                         column("nombre", "VARCHAR"),
                         column("precio", "DECIMAL"),
                         column("categoria", "VARCHAR")
+                ),
+                "empleados", table("empleados",
+                        column("id", "INTEGER"),
+                        column("nombre", "VARCHAR"),
+                        column("salario", "DECIMAL"),
+                        column("puesto", "VARCHAR"),
+                        column("id_departamento", "INTEGER")
+                ),
+                "clientes", table("clientes",
+                        column("id", "INTEGER"),
+                        column("id_cliente", "INTEGER"),
+                        column("nombre", "VARCHAR"),
+                        column("email", "VARCHAR")
+                ),
+                "pedidos", table("pedidos",
+                        column("id", "INTEGER"),
+                        column("id_cliente", "INTEGER"),
+                        column("cantidad", "INTEGER"),
+                        column("monto", "DECIMAL"),
+                        column("fecha", "DATE")
+                ),
+                "detalles", table("detalles",
+                        column("id", "INTEGER"),
+                        column("id_pedido", "INTEGER"),
+                        column("id_producto", "INTEGER"),
+                        column("cantidad", "INTEGER"),
+                        column("precio_unitario", "DECIMAL")
+                ),
+                "detalles_pedidos", table("detalles_pedidos",
+                        column("id", "INTEGER"),
+                        column("id_pedido", "INTEGER"),
+                        column("id_producto", "INTEGER"),
+                        column("cantidad", "INTEGER"),
+                        column("precio_unitario", "DECIMAL")
+                ),
+                "ventas", table("ventas",
+                        column("id", "INTEGER"),
+                        column("id_vendedor", "INTEGER"),
+                        column("id_pedido", "INTEGER"),
+                        column("monto", "DECIMAL")
                 )
         );
     }

@@ -154,7 +154,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         if (query.tableName().isEmpty()) {
             List<String> nestedTables = collectSqlFromTables(ast);
             if (!nestedTables.isEmpty() || query.rawQuery().matches("(?is).*\\bFROM\\s*\\(\\s*SELECT\\b.*")) {
-                validateCollectedTables(nestedTables, engine, errors, symbols);
+                validateCollectedTables(nestedTables, collectCteNames(ast), engine, warnings, symbols);
                 symbols.put("fromSubquery", true);
                 return;
             }
@@ -166,23 +166,108 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         String tableName = query.tableName().get();
         symbols.put("table", tableName);
         Optional<TableDefinition> table = catalogService.findTable(engine, tableName);
+        Set<String> cteNames = collectCteNames(ast);
+        List<String> referencedTables = collectSqlFromTables(ast);
         if (table.isEmpty()) {
-            errors.add("La tabla '" + tableName + "' no existe en el catalogo para " + engine.name() + ".");
-            return;
+            if (!cteNames.contains(tableName.toLowerCase(Locale.ROOT))) {
+                warnings.add("La tabla '" + tableName + "' no esta en el catalogo local; se omite validacion de columnas.");
+            }
         }
+
+        validateAliasReferences(ast, query.rawQuery(), errors, symbols);
 
         List<String> selectedColumns = query.columns();
         symbols.put("columns", selectedColumns);
-        if (!selectedColumns.contains("*")) {
+        if (table.isPresent() && !selectedColumns.contains("*") && referencedTables.size() <= 1 && !hasNode(ast, "JoinClause")) {
             for (String column : selectedColumns) {
-                if (table.get().findColumn(column).isEmpty()) {
+                String normalizedColumn = normalizeColumnReference(column);
+                if (isDerivedExpression(normalizedColumn)) {
+                    continue;
+                }
+                if (table.get().findColumn(normalizedColumn).isEmpty()) {
                     errors.add("La columna '" + column + "' no existe en la tabla '" + tableName + "'.");
                 }
             }
         }
 
-        query.where().ifPresent(where -> validateWhere(where, table.get(), tableName, errors, symbols));
-        validateCollectedTables(collectSqlFromTables(ast), engine, errors, symbols);
+        if (table.isPresent() && !hasNode(ast, "JoinClause")) {
+            query.where().ifPresent(where -> validateWhere(where, table.get(), tableName, errors, symbols));
+        }
+        validateCollectedTables(referencedTables, cteNames, engine, warnings, symbols);
+    }
+
+    private void validateAliasReferences(
+            AstNode ast,
+            String rawQuery,
+            List<String> errors,
+            Map<String, Object> symbols
+    ) {
+        Map<String, String> aliases = collectTableAliases(ast);
+        if (aliases.isEmpty() || rawQuery == null || rawQuery.isBlank()) {
+            return;
+        }
+
+        symbols.put("aliases", aliases);
+        for (Map.Entry<String, String> entry : aliases.entrySet()) {
+            String table = entry.getKey();
+            String alias = entry.getValue();
+            Pattern tableReference = Pattern.compile("(?i)\\b" + Pattern.quote(table) + "\\s*\\.");
+            if (tableReference.matcher(rawQuery).find()) {
+                errors.add("La tabla '" + table + "' fue renombrada como '" + alias
+                        + "'. Usa el alias en referencias calificadas, por ejemplo '" + alias + ".columna'.");
+            }
+        }
+    }
+
+    private Map<String, String> collectTableAliases(AstNode ast) {
+        Map<String, String> aliases = new LinkedHashMap<>();
+        collectTableAliases(ast, aliases);
+        return aliases;
+    }
+
+    private void collectTableAliases(AstNode node, Map<String, String> aliases) {
+        if (node == null) {
+            return;
+        }
+        if ("FromClause".equals(node.getType())
+                && node.getValue() != null
+                && !"SUBQUERY".equals(node.getValue())
+                && node.getAttributes() != null
+                && node.getAttributes().get("alias") instanceof String alias
+                && !alias.isBlank()) {
+            aliases.put(node.getValue().toLowerCase(Locale.ROOT), alias);
+        }
+        if (node.getChildren() != null) {
+            node.getChildren().forEach(child -> collectTableAliases(child, aliases));
+        }
+    }
+
+    private boolean hasNode(AstNode node, String type) {
+        if (node == null) {
+            return false;
+        }
+        if (type.equals(node.getType())) {
+            return true;
+        }
+        return node.getChildren() != null && node.getChildren().stream().anyMatch(child -> hasNode(child, type));
+    }
+
+    private Set<String> collectCteNames(AstNode ast) {
+        Set<String> cteNames = new HashSet<>();
+        collectCteNames(ast, cteNames);
+        return cteNames;
+    }
+
+    private void collectCteNames(AstNode node, Set<String> cteNames) {
+        if (node == null) {
+            return;
+        }
+        if ("Cte".equals(node.getType()) && node.getValue() != null) {
+            cteNames.add(node.getValue().toLowerCase(Locale.ROOT));
+        }
+        if (node.getChildren() != null) {
+            node.getChildren().forEach(child -> collectCteNames(child, cteNames));
+        }
     }
 
     private List<String> collectSqlFromTables(AstNode ast) {
@@ -211,8 +296,9 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
     private void validateCollectedTables(
             List<String> tables,
+            Set<String> cteNames,
             DatabaseEngine engine,
-            List<String> errors,
+            List<String> warnings,
             Map<String, Object> symbols
     ) {
         if (tables.isEmpty()) {
@@ -221,8 +307,11 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         symbols.put("referencedTables", tables);
         for (String tableName : tables) {
+            if (cteNames.contains(tableName.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
             if (catalogService.findTable(engine, tableName).isEmpty()) {
-                errors.add("La tabla '" + tableName + "' no existe en el catalogo para " + engine.name() + ".");
+                warnings.add("La tabla '" + tableName + "' no esta en el catalogo local; se omite validacion de columnas.");
             }
         }
     }
@@ -442,7 +531,8 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
             List<String> errors,
             Map<String, Object> symbols
     ) {
-        Optional<ColumnDefinition> leftColumn = table.findColumn(where.left());
+        String normalizedLeft = normalizeColumnReference(where.left());
+        Optional<ColumnDefinition> leftColumn = table.findColumn(normalizedLeft);
         if (leftColumn.isEmpty()) {
             errors.add("La columna '" + where.left() + "' no existe en la tabla '" + tableName + "'.");
             return;
@@ -450,7 +540,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
         String rightType = inferLiteralType(where.right(), table);
         symbols.put("where", Map.of(
-                "column", where.left(),
+                "column", normalizedLeft,
                 "operator", where.operator(),
                 "rightType", rightType
         ));
@@ -472,9 +562,24 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         if (trimmed.matches("-?\\d+\\.\\d+")) {
             return "DECIMAL";
         }
-        return table.findColumn(trimmed)
+        return table.findColumn(normalizeColumnReference(trimmed))
                 .map(ColumnDefinition::dataType)
                 .orElse("UNKNOWN");
+    }
+
+    private String normalizeColumnReference(String column) {
+        String trimmed = column == null ? "" : column.trim();
+        if (trimmed.contains(".")) {
+            return trimmed.substring(trimmed.lastIndexOf('.') + 1).trim();
+        }
+        return trimmed;
+    }
+
+    private boolean isDerivedExpression(String column) {
+        String upper = column.toUpperCase(Locale.ROOT);
+        return upper.matches("[A-Z_][A-Z0-9_]*\\s*\\(.*\\)")
+                || upper.contains(" AS ")
+                || upper.matches(".*\\s+[A-Z_][A-Z0-9_]*$");
     }
 
     private boolean typesAreCompatible(String left, String right, String operator) {
@@ -613,6 +718,18 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
                     .orElseGet(() -> firstWord(normalized));
             Optional<String> tableFromAttributes = attributeString(ast, "tableName");
             List<String> columnsFromAttributes = attributeStringList(ast, "columns");
+            Optional<AstNode> primarySelect = primarySelect(ast);
+            if (primarySelect.isPresent()) {
+                List<String> astColumns = projectionValues(primarySelect.get());
+                Optional<String> astTable = fromTable(primarySelect.get());
+                return new QueryShape(
+                        Optional.of("SELECT"),
+                        normalized,
+                        tableFromAttributes.or(() -> astTable),
+                        columnsFromAttributes.isEmpty() ? astColumns : columnsFromAttributes,
+                        whereFromAst(primarySelect.get())
+                );
+            }
 
             if ("SELECT".equals(operation)) {
                 if (normalized.matches("(?is)^\\s*SELECT\\s+.+?\\s+FROM\\s*\\(\\s*SELECT\\b.*")) {
@@ -635,7 +752,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
                             normalized,
                             tableFromAttributes.or(() -> Optional.of(table)),
                             columnsFromAttributes.isEmpty() ? parseColumns(rawColumns) : columnsFromAttributes,
-                            parseWhere(tail)
+                            tail.matches("(?is).*\\(\\s*SELECT\\b.*") ? Optional.empty() : parseWhere(tail)
                     );
                 }
             }
@@ -647,6 +764,65 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
                     columnsFromAttributes,
                     Optional.empty()
             );
+        }
+
+        private static Optional<AstNode> primarySelect(AstNode ast) {
+            if (ast == null || ast.getChildren() == null) {
+                return Optional.empty();
+            }
+
+            for (AstNode child : ast.getChildren()) {
+                if ("SelectStatement".equals(child.getType())) {
+                    return Optional.of(child);
+                }
+                if ("WithStatement".equals(child.getType()) && child.getChildren() != null) {
+                    return child.getChildren().stream()
+                            .filter(grandChild -> "SelectStatement".equals(grandChild.getType()))
+                            .findFirst();
+                }
+            }
+            return Optional.empty();
+        }
+
+        private static List<String> projectionValues(AstNode select) {
+            return select.getChildren().stream()
+                    .filter(child -> "ProjectionList".equals(child.getType()))
+                    .findFirst()
+                    .map(projectionList -> projectionList.getChildren().stream()
+                            .map(AstNode::getValue)
+                            .filter(value -> value != null && !value.isBlank())
+                            .toList())
+                    .orElse(List.of());
+        }
+
+        private static Optional<String> fromTable(AstNode select) {
+            return select.getChildren().stream()
+                    .filter(child -> "FromClause".equals(child.getType()))
+                    .map(AstNode::getValue)
+                    .filter(value -> value != null && !value.isBlank() && !"SUBQUERY".equals(value))
+                    .findFirst();
+        }
+
+        private static Optional<WhereCondition> whereFromAst(AstNode select) {
+            return select.getChildren().stream()
+                    .filter(child -> "WhereClause".equals(child.getType()))
+                    .findFirst()
+                    .flatMap(where -> where.getChildren().stream()
+                            .filter(condition -> "Condition".equals(condition.getType()))
+                            .findFirst())
+                    .flatMap(condition -> {
+                        Object operator = condition.getAttributes().get("operator");
+                        Object right = condition.getAttributes().get("right");
+                        if (!(operator instanceof String op) || !(right instanceof String rightValue)
+                                || "SUBQUERY".equals(rightValue) || "SUBQUERY_OR_LIST".equals(rightValue)) {
+                            return Optional.empty();
+                        }
+                        return Optional.of(new WhereCondition(
+                                condition.getValue(),
+                                op,
+                                rightValue
+                        ));
+                    });
         }
 
         private static Optional<String> attributeString(AstNode ast, String key) {

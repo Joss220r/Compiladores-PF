@@ -223,11 +223,11 @@ class QueryValidationControllerTest {
     }
 
     @Test
-    void validateQueryRejectsUnknownTable() throws Exception {
+    void validateQueryWarnsUnknownTableWithoutInvalidatingSyntax() throws Exception {
         String request = """
                 {
                   "engine": "POSTGRESQL",
-                  "query": "SELECT nombre FROM clientes;"
+                  "query": "SELECT nombre FROM tabla_inexistente;"
                 }
                 """;
 
@@ -235,9 +235,10 @@ class QueryValidationControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.valid").value(false))
-                .andExpect(jsonPath("$.errors[0].message", containsString("tabla 'clientes'")))
-                .andExpect(jsonPath("$.semanticResult.valid").value(false));
+                .andExpect(jsonPath("$.valid").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)))
+                .andExpect(jsonPath("$.warnings[0].message", containsString("catalogo local")))
+                .andExpect(jsonPath("$.semanticResult.valid").value(true));
     }
 
     @Test
@@ -1166,5 +1167,170 @@ class QueryValidationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errors[0].message", containsString("Falta cerrar")));
+    }
+
+    @Test
+    void sqlAcceptsCorrelatedNestedSelectWithAliasAndAggregate() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT e.nombre, e.salario, e.id_departamento FROM empleados e WHERE e.salario > (SELECT AVG(sub.salario) FROM empleados sub WHERE sub.id_departamento = e.id_departamento);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsNestedSelectAcrossCatalogTables() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre, email FROM clientes WHERE id IN (SELECT id_cliente FROM pedidos WHERE cantidad > 100);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsDerivedTableWithJoinGroupByAndHavingLikeFilter() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT sub.categoria, sub.total_ventas, (sub.total_ventas * 0.15) AS impuesto_estimado FROM (SELECT p.categoria, SUM(d.cantidad * d.precio_unitario) AS total_ventas FROM productos p JOIN detalles_pedidos d ON p.id = d.id_producto GROUP BY p.categoria) AS sub WHERE sub.total_ventas > 5000;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsScalarSubqueriesInsideProjectionList() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT e.nombre AS empleado, e.salario, (SELECT MAX(salario) FROM empleados) AS salario_maximo_empresa, e.salario - (SELECT AVG(salario) FROM empleados) AS desviacion_promedio FROM empleados e;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsHavingWithNestedDerivedTable() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT id_departamento, SUM(salario) AS total_departamento FROM empleados GROUP BY id_departamento HAVING SUM(salario) > (SELECT AVG(total_salario) FROM (SELECT SUM(salario) AS total_salario FROM empleados GROUP BY id_departamento) AS subconsulta_promedio);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsAllQuantifierWithNestedSelect() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre, salario, puesto FROM empleados WHERE salario > ALL (SELECT salario FROM empleados WHERE puesto = 'Reclutador');"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsWithCtesAndNestedSelects() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "WITH ResumenVentas AS (SELECT id_vendedor, COUNT(id_pedido) AS total_pedidos, SUM(monto) AS monto_total FROM ventas GROUP BY id_vendedor), MejoresVendedores AS (SELECT id_vendedor FROM ResumenVentas WHERE monto_total > (SELECT AVG(monto_total) FROM ResumenVentas)) SELECT v.nombre, r.total_pedidos, r.monto_total FROM empleados v JOIN ResumenVentas r ON v.id = r.id_vendedor WHERE v.id IN (SELECT id_vendedor FROM MejoresVendedores);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsInnerJoinWithAliasesAndOnCondition() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT id, nombre FROM clientes c INNER JOIN pedidos p ON c.id = p.id_cliente;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsJoinUsingClause() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT c.nombre, p.monto FROM clientes c INNER JOIN pedidos p USING (id_cliente);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlRejectsOriginalTableNameAfterAlias() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT clientes.nombre FROM clientes c INNER JOIN pedidos p ON c.id = p.id_cliente;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message", containsString("fue renombrada como 'c'")));
+    }
+
+    @Test
+    void sqlAcceptsMultipleJoinTypesAndDateFilter() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT c.nombre AS cliente, p.id AS factura, prod.nombre AS producto FROM clientes c LEFT JOIN pedidos p ON c.id = p.id_cliente INNER JOIN detalles d ON p.id = d.id_pedido INNER JOIN productos prod ON d.id_producto = prod.id WHERE p.fecha > '2026-01-01';"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
     }
 }

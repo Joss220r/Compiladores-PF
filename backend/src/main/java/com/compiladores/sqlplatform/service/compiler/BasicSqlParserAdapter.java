@@ -221,6 +221,9 @@ public class BasicSqlParserAdapter implements ParserPort {
         if (state.matchKeyword("SELECT")) {
             return parseSelect(state, errors);
         }
+        if (state.matchKeyword("WITH")) {
+            return parseWith(state, errors);
+        }
         if (state.matchKeyword("INSERT")) {
             return parseInsert(state, errors);
         }
@@ -237,8 +240,45 @@ public class BasicSqlParserAdapter implements ParserPort {
             return parseDropTable(state, errors);
         }
 
-        errors.add("Se esperaba SELECT, INSERT, UPDATE, DELETE, CREATE o DROP y se encontro '" + state.peek().lexeme() + "'.");
+        errors.add("Se esperaba SELECT, INSERT, UPDATE, DELETE, CREATE, DROP o WITH y se encontro '" + state.peek().lexeme() + "'.");
         return null;
+    }
+
+    private AstNode parseWith(ParserState state, List<String> errors) {
+        List<AstNode> ctes = new ArrayList<>();
+
+        while (!state.isAtEnd()) {
+            SqlToken cteName = consumeIdentifier(state, "nombre de CTE despues de WITH", errors);
+            if (state.matchKeyword("AS")) {
+                if (state.matchSymbol("(")) {
+                    ctes.add(node("Cte", valueOf(cteName), tokenAttributes(cteName),
+                            List.of(parseSubqueryAfterOpeningParenthesis(state, "WITH", errors))));
+                } else {
+                    errors.add("La CTE " + valueOf(cteName) + " debe usar AS (SELECT ...).");
+                }
+            } else {
+                errors.add("La CTE " + valueOf(cteName) + " debe incluir AS.");
+            }
+
+            if (state.matchSymbol(",")) {
+                continue;
+            }
+            break;
+        }
+
+        AstNode mainStatement = null;
+        if (state.matchKeyword("SELECT")) {
+            mainStatement = parseSelect(state, errors);
+        } else {
+            errors.add("WITH debe terminar con una consulta SELECT principal.");
+        }
+
+        List<AstNode> children = new ArrayList<>();
+        children.add(node("CteList", null, Map.of("count", ctes.size()), ctes));
+        if (mainStatement != null) {
+            children.add(mainStatement);
+        }
+        return node("WithStatement", "WITH", Map.of(), children);
     }
 
     private AstNode parseSelect(ParserState state, List<String> errors) {
@@ -247,14 +287,56 @@ public class BasicSqlParserAdapter implements ParserPort {
 
         if (state.matchKeyword("FROM")) {
             children.add(parseFromClause(state, errors));
+            children.addAll(parseJoinClauses(state, errors));
         } else {
             errors.add("La sentencia SELECT debe incluir FROM.");
         }
 
         parseOptionalWhere(state, errors, children);
+        parseOptionalSelectClauses(state, errors, children);
         consumeOptionalSemicolon(state);
 
         return node("SelectStatement", "SELECT", Map.of(), children);
+    }
+
+    private List<AstNode> parseJoinClauses(ParserState state, List<String> errors) {
+        List<AstNode> joins = new ArrayList<>();
+        while (isJoinStart(state)) {
+            List<AstNode> children = new ArrayList<>();
+            List<String> joinType = new ArrayList<>();
+            while (!state.isAtEnd() && !state.checkKeyword("JOIN")) {
+                joinType.add(state.advance().lexeme());
+            }
+            if (!state.matchKeyword("JOIN")) {
+                errors.add("JOIN debe indicar la tabla a unir.");
+                break;
+            }
+            children.add(parseFromClause(state, errors));
+            if (state.matchKeyword("ON")) {
+                children.add(parseExpressionUntil(state, "JoinCondition",
+                        Set.of("WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS")));
+            } else if (state.matchKeyword("USING")) {
+                if (state.matchSymbol("(")) {
+                    children.add(parseDelimitedList(state, "UsingClause", "Column", ")", errors));
+                } else {
+                    errors.add("USING debe incluir columnas entre parentesis.");
+                }
+            } else {
+                errors.add("JOIN debe incluir ON o USING con la condicion de union.");
+            }
+            joins.add(node("JoinClause", String.join(" ", joinType).trim(), Map.of(), children));
+        }
+        return joins;
+    }
+
+    private boolean isJoinStart(ParserState state) {
+        return state.checkKeyword("JOIN")
+                || state.checkKeyword("INNER")
+                || state.checkKeyword("LEFT")
+                || state.checkKeyword("RIGHT")
+                || state.checkKeyword("FULL")
+                || state.checkKeyword("CROSS")
+                || state.checkKeyword("NATURAL");
     }
 
     private AstNode parseFromClause(ParserState state, List<String> errors) {
@@ -266,6 +348,7 @@ public class BasicSqlParserAdapter implements ParserPort {
             Map<String, Object> attributes = new LinkedHashMap<>();
             attributes.put("source", "subquery");
 
+            state.matchKeyword("AS");
             if (!state.isAtEnd() && !state.peek().isClauseBoundary() && !state.checkKeyword("WHERE")) {
                 SqlToken alias = state.advance();
                 attributes.put("alias", alias.lexeme());
@@ -278,26 +361,57 @@ public class BasicSqlParserAdapter implements ParserPort {
         }
 
         SqlToken table = consumeIdentifier(state, "nombre de tabla despues de FROM", errors);
-        return node("FromClause", valueOf(table), tokenAttributes(table), List.of());
+        Map<String, Object> attributes = new LinkedHashMap<>(tokenAttributes(table));
+        List<AstNode> children = new ArrayList<>();
+        state.matchKeyword("AS");
+        if (!state.isAtEnd() && !state.peek().isClauseBoundary() && !state.checkKeyword("WHERE")) {
+            SqlToken alias = state.advance();
+            attributes.put("alias", alias.lexeme());
+            children.add(tokenNode("Alias", alias));
+        }
+        return node("FromClause", valueOf(table), attributes, children);
     }
 
     private AstNode parseProjectionList(ParserState state, List<String> errors) {
         List<AstNode> projections = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        SqlToken start = null;
+        int depth = 0;
 
-        while (!state.isAtEnd() && !state.checkKeyword("FROM")) {
-            if (state.matchSymbol(",")) {
+        while (!state.isAtEnd() && !(depth == 0 && state.checkKeyword("FROM"))) {
+            SqlToken token = state.advance();
+            if (start == null) {
+                start = token;
+            }
+            if (token.isSymbol("(")) {
+                depth++;
+            } else if (token.isSymbol(")") && depth > 0) {
+                depth--;
+            }
+
+            if (depth == 0 && ",".equals(token.lexeme())) {
+                addProjection(projections, current, start);
+                current.setLength(0);
+                start = null;
                 continue;
             }
 
-            SqlToken projection = state.advance();
-            projections.add(node("Projection", projection.lexeme(), tokenAttributes(projection), List.of()));
+            appendLexeme(current, token.lexeme());
         }
+        addProjection(projections, current, start);
 
         if (projections.isEmpty()) {
             errors.add("La sentencia SELECT debe indicar al menos una columna o '*'.");
         }
 
         return node("ProjectionList", null, Map.of("count", projections.size()), projections);
+    }
+
+    private void addProjection(List<AstNode> projections, StringBuilder current, SqlToken start) {
+        String value = current.toString().trim();
+        if (!value.isBlank()) {
+            projections.add(node("Projection", value, tokenAttributes(start), List.of()));
+        }
     }
 
     private AstNode parseInsert(ParserState state, List<String> errors) {
@@ -461,6 +575,29 @@ public class BasicSqlParserAdapter implements ParserPort {
         }
 
         SqlToken operator = consumeOperator(state, errors);
+        if (state.matchKeyword("ALL") || state.matchKeyword("ANY")) {
+            SqlToken quantifier = state.previous();
+            if (state.matchSymbol("(") && state.checkKeyword("SELECT")) {
+                AstNode subquery = parseSubqueryAfterOpeningParenthesis(state, quantifier.lexeme(), errors);
+                return node(
+                        "Condition",
+                        valueOf(left),
+                        Map.of("operator", valueOf(operator), "quantifier", quantifier.lexeme(), "right", "SUBQUERY"),
+                        List.of(tokenNode("LeftOperand", left), tokenNode("Operator", operator), tokenNode("Quantifier", quantifier), subquery)
+                );
+            }
+            errors.add(quantifier.lexeme() + " requiere una subconsulta entre parentesis.");
+        }
+        if (state.matchSymbol("(") && state.checkKeyword("SELECT")) {
+            AstNode subquery = parseSubqueryAfterOpeningParenthesis(state, valueOf(operator), errors);
+            return node(
+                    "Condition",
+                    valueOf(left),
+                    Map.of("operator", valueOf(operator), "right", "SUBQUERY"),
+                    List.of(tokenNode("LeftOperand", left), tokenNode("Operator", operator), subquery)
+            );
+        }
+
         SqlToken right = consumeValue(state, "operando derecho en WHERE", errors);
 
         return node(
@@ -512,6 +649,55 @@ public class BasicSqlParserAdapter implements ParserPort {
         }
 
         return node("InOperand", null, Map.of("kind", "list", "count", values.size()), values);
+    }
+
+    private void parseOptionalSelectClauses(ParserState state, List<String> errors, List<AstNode> children) {
+        while (!state.isAtEnd() && !state.checkSymbol(";") && !state.checkSymbol(")")) {
+            if (state.matchKeyword("GROUP")) {
+                if (!state.matchKeyword("BY")) {
+                    errors.add("GROUP debe estar seguido por BY.");
+                }
+                children.add(parseExpressionUntil(state, "GroupByClause", Set.of("HAVING", "ORDER", "LIMIT")));
+                continue;
+            }
+            if (state.matchKeyword("HAVING")) {
+                children.add(parseExpressionUntil(state, "HavingClause", Set.of("ORDER", "LIMIT")));
+                continue;
+            }
+            if (state.matchKeyword("ORDER")) {
+                if (!state.matchKeyword("BY")) {
+                    errors.add("ORDER debe estar seguido por BY.");
+                }
+                children.add(parseExpressionUntil(state, "OrderByClause", Set.of("LIMIT")));
+                continue;
+            }
+            if (state.matchKeyword("LIMIT")) {
+                children.add(parseExpressionUntil(state, "LimitClause", Set.of()));
+                continue;
+            }
+            break;
+        }
+    }
+
+    private AstNode parseExpressionUntil(ParserState state, String type, Set<String> boundaryKeywords) {
+        List<AstNode> tokens = new ArrayList<>();
+        int depth = 0;
+        while (!state.isAtEnd() && !state.checkSymbol(";")) {
+            if (depth == 0 && state.checkSymbol(")")) {
+                break;
+            }
+            if (depth == 0 && boundaryKeywords.stream().anyMatch(state::checkKeyword)) {
+                break;
+            }
+            SqlToken token = state.advance();
+            if (token.isSymbol("(")) {
+                depth++;
+            } else if (token.isSymbol(")") && depth > 0) {
+                depth--;
+            }
+            tokens.add(tokenNode("ExpressionToken", token));
+        }
+        return node(type, joinLexemesFromNodes(tokens), Map.of("count", tokens.size()), tokens);
     }
 
     private AstNode parseSubqueryAfterOpeningParenthesis(ParserState state, String context, List<String> errors) {
@@ -612,11 +798,21 @@ public class BasicSqlParserAdapter implements ParserPort {
 
     private SqlToken consumeValue(ParserState state, String expected, List<String> errors) {
         if (!state.isAtEnd() && !state.peek().isClauseBoundary()) {
-            return state.advance();
+            return consumeQualifiedValue(state);
         }
 
         errors.add("Se esperaba " + expected + ".");
         return SqlToken.missing(expected);
+    }
+
+    private SqlToken consumeQualifiedValue(ParserState state) {
+        SqlToken first = state.advance();
+        if (!state.isAtEnd() && state.checkSymbol(".") && state.hasNext()) {
+            state.advance();
+            SqlToken second = state.advance();
+            return new SqlToken(first.type(), first.lexeme() + "." + second.lexeme(), first.line(), first.column());
+        }
+        return first;
     }
 
     private SqlToken consumeOperator(ParserState state, List<String> errors) {
@@ -746,16 +942,32 @@ public class BasicSqlParserAdapter implements ParserPort {
     private static String joinLexemes(List<SqlToken> tokens) {
         StringBuilder joined = new StringBuilder();
         for (SqlToken token : tokens) {
-            if (!joined.isEmpty() && !Set.of(",", ")", ";").contains(token.lexeme())
-                    && !"(".equals(previousLexeme(joined))) {
-                joined.append(' ');
-            }
-            joined.append(token.lexeme());
+            appendLexeme(joined, token.lexeme());
         }
         return joined.toString();
     }
 
-    private static String previousLexeme(StringBuilder joined) {
+    private static String joinLexemesFromNodes(List<AstNode> nodes) {
+        StringBuilder joined = new StringBuilder();
+        for (AstNode node : nodes) {
+            appendLexeme(joined, node.getValue());
+        }
+        return joined.toString().trim();
+    }
+
+    private static void appendLexeme(StringBuilder joined, String lexeme) {
+        if (lexeme == null || lexeme.isBlank()) {
+            return;
+        }
+        if (!joined.isEmpty() && !Set.of(",", ")", ";", ".").contains(lexeme)
+                && !"(".equals(lastCharacter(joined))
+                && !".".equals(lastCharacter(joined))) {
+            joined.append(' ');
+        }
+        joined.append(lexeme);
+    }
+
+    private static String lastCharacter(StringBuilder joined) {
         if (joined.isEmpty()) {
             return "";
         }
@@ -778,6 +990,9 @@ public class BasicSqlParserAdapter implements ParserPort {
         List<SqlToken> expanded = new ArrayList<>();
 
         for (TokenInfo token : tokens) {
+            if ("COMMENT".equals(token.getType())) {
+                continue;
+            }
             expanded.addAll(splitToken(token));
         }
 
@@ -877,12 +1092,13 @@ public class BasicSqlParserAdapter implements ParserPort {
     private static boolean isKeyword(String lexeme) {
         return List.of(
                 "SELECT", "INSERT", "INTO", "UPDATE", "DELETE", "FROM", "WHERE", "SET", "VALUES", "AND", "OR",
-                "IN", "EXISTS"
+                "IN", "EXISTS", "AS", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "ON", "GROUP", "BY",
+                "HAVING", "ORDER", "LIMIT", "WITH", "ALL", "ANY", "OUTER", "USING", "NATURAL"
         ).contains(lexeme);
     }
 
     private static boolean isSymbol(String lexeme) {
-        return List.of(",", "(", ")", ";", "*").contains(lexeme);
+        return List.of(",", "(", ")", ";", "*", ".").contains(lexeme);
     }
 
     private static boolean isOperator(String lexeme) {
@@ -918,6 +1134,19 @@ public class BasicSqlParserAdapter implements ParserPort {
                     || isKeyword("WHERE")
                     || isKeyword("AND")
                     || isKeyword("OR")
+                    || isKeyword("ON")
+                    || isKeyword("JOIN")
+                    || isKeyword("INNER")
+                    || isKeyword("LEFT")
+                    || isKeyword("RIGHT")
+                    || isKeyword("FULL")
+                    || isKeyword("CROSS")
+                    || isKeyword("NATURAL")
+                    || isKeyword("USING")
+                    || isKeyword("GROUP")
+                    || isKeyword("HAVING")
+                    || isKeyword("ORDER")
+                    || isKeyword("LIMIT")
                     || isKeyword("FROM")
                     || isKeyword("SET")
                     || isKeyword("VALUES");
@@ -975,6 +1204,10 @@ public class BasicSqlParserAdapter implements ParserPort {
             return tokens.get(position++);
         }
 
+        private SqlToken previous() {
+            return tokens.get(position - 1);
+        }
+
         private boolean checkKeyword(String keyword) {
             return !isAtEnd() && peek().isKeyword(keyword);
         }
@@ -989,6 +1222,10 @@ public class BasicSqlParserAdapter implements ParserPort {
 
         private boolean checkSymbol(String symbol) {
             return !isAtEnd() && peek().isSymbol(symbol);
+        }
+
+        private boolean hasNext() {
+            return position + 1 < tokens.size();
         }
 
         private boolean matchSymbol(String symbol) {
