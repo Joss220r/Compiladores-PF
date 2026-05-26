@@ -2,14 +2,25 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import { fetchHistory, fetchHistoryStats, validateQuery } from './services/queryValidationApi'
+import { login } from './services/queryValidationApi'
 
 vi.mock('./services/queryValidationApi', () => ({
   fetchHistory: vi.fn(),
   fetchHistoryStats: vi.fn(),
+  login: vi.fn(),
   validateQuery: vi.fn()
 }))
 
 function mountApp() {
+  localStorage.setItem('sql-platform-user', JSON.stringify({
+    username: 'admin',
+    displayName: 'Administrador',
+    role: 'ADMIN'
+  }))
+  return mount(App)
+}
+
+function mountLoggedOutApp() {
   return mount(App)
 }
 
@@ -148,6 +159,24 @@ describe('App', () => {
 
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(wrapper.find('.theme-toggle').attributes('aria-pressed')).toBe('true')
+  })
+
+  it('permite iniciar sesion', async () => {
+    login.mockResolvedValueOnce({
+      success: true,
+      username: 'admin',
+      displayName: 'Administrador',
+      role: 'ADMIN'
+    })
+
+    const wrapper = mountLoggedOutApp()
+    await wrapper.find('input[type="text"]').setValue('admin')
+    await wrapper.find('input[type="password"]').setValue('admin123')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Validador')
+    expect(localStorage.getItem('sql-platform-user')).toContain('admin')
   })
 
   it('muestra y aplica una sugerencia de correccion', async () => {

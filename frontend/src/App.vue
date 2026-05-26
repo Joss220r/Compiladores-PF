@@ -1,8 +1,9 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
-import { fetchHistory, fetchHistoryStats, validateQuery } from './services/queryValidationApi'
+import { fetchHistory, fetchHistoryStats, login, validateQuery } from './services/queryValidationApi'
 
 const THEME_STORAGE_KEY = 'sql-platform-theme'
+const AUTH_STORAGE_KEY = 'sql-platform-user'
 
 const engines = [
   { label: 'NoSQL', value: 'NOSQL' },
@@ -25,6 +26,11 @@ const dashboardLoading = ref(false)
 const dashboardError = ref('')
 const dashboardStats = ref(null)
 const dashboardItems = ref([])
+const authUser = ref(getStoredUser())
+const loginUsername = ref('')
+const loginPassword = ref('')
+const loginLoading = ref(false)
+const loginError = ref('')
 
 const resultClass = computed(() => {
   if (!result.value) {
@@ -57,6 +63,23 @@ function saveStoredTheme(value) {
     localStorage.setItem(THEME_STORAGE_KEY, value)
   } catch {
     // The theme still changes visually if storage is blocked by the browser.
+  }
+}
+
+function getStoredUser() {
+  try {
+    const savedUser = localStorage.getItem(AUTH_STORAGE_KEY)
+    return savedUser ? JSON.parse(savedUser) : null
+  } catch {
+    return null
+  }
+}
+
+function saveStoredUser(user) {
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
+  } catch {
+    // Login still works for the current session if storage is blocked.
   }
 }
 
@@ -95,6 +118,39 @@ async function submitQuery() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function submitLogin() {
+  loginLoading.value = true
+  loginError.value = ''
+
+  try {
+    const response = await login({
+      username: loginUsername.value,
+      password: loginPassword.value
+    })
+    authUser.value = {
+      username: response.username,
+      displayName: response.displayName,
+      role: response.role
+    }
+    saveStoredUser(authUser.value)
+    loginPassword.value = ''
+  } catch (error) {
+    loginError.value = error.message || 'No se pudo iniciar sesion.'
+  } finally {
+    loginLoading.value = false
+  }
+}
+
+function logout() {
+  authUser.value = null
+  activeView.value = 'validator'
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+  } catch {
+    // Ignore storage cleanup errors.
   }
 }
 
@@ -167,23 +223,55 @@ function shortQuery(value) {
 
 <template>
   <main class="app-shell">
-    <div v-if="loading" class="loader-overlay" role="status" aria-live="polite">
+    <section v-if="!authUser" class="login-shell">
+      <div class="login-panel">
+        <div>
+          <h1>SQL Platform Validator</h1>
+          <p class="message">Ingresa para analizar querys y consultar el dashboard.</p>
+        </div>
+
+        <form class="query-form" @submit.prevent="submitLogin">
+          <label class="field">
+            <span>Usuario</span>
+            <input v-model="loginUsername" type="text" autocomplete="username" placeholder="admin" />
+          </label>
+
+          <label class="field">
+            <span>Contrasena</span>
+            <input v-model="loginPassword" type="password" autocomplete="current-password" placeholder="admin123" />
+          </label>
+
+          <div v-if="loginError" class="error-box">
+            {{ loginError }}
+          </div>
+
+          <button class="primary-button" type="submit" :disabled="loginLoading">
+            {{ loginLoading ? 'Ingresando...' : 'Ingresar' }}
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <div v-if="authUser && loading" class="loader-overlay" role="status" aria-live="polite">
       <div class="loader-box">
         <img src="/loading.gif" alt="" />
         <span>Validando query...</span>
       </div>
     </div>
 
-    <nav class="view-tabs" aria-label="Vistas">
+    <nav v-if="authUser" class="view-tabs" aria-label="Vistas">
       <button type="button" :class="{ active: activeView === 'validator' }" @click="showValidator">
         Validador
       </button>
       <button type="button" :class="{ active: activeView === 'dashboard' }" @click="showDashboard">
         Dashboard
       </button>
+      <button type="button" class="logout-tab" @click="logout">
+        Salir
+      </button>
     </nav>
 
-    <section v-if="activeView === 'validator'" class="workspace">
+    <section v-if="authUser && activeView === 'validator'" class="workspace">
       <div class="editor-panel">
         <div class="title-row">
           <div>
@@ -325,7 +413,7 @@ function shortQuery(value) {
       </div>
     </section>
 
-    <section v-else class="dashboard-panel">
+    <section v-else-if="authUser" class="dashboard-panel">
       <div class="panel-header">
         <h2>Dashboard</h2>
         <button class="secondary-button refresh-button" type="button" :disabled="dashboardLoading" @click="loadDashboard">

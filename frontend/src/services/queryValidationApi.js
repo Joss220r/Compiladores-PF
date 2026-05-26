@@ -1,10 +1,18 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
+export async function login(payload) {
+  return postJson('/api/auth/login', payload, 'No se pudo iniciar sesion.')
+}
+
 export async function validateQuery(payload) {
+  return postJson('/api/validate', payload, `No se pudo conectar con el backend en ${API_BASE_URL}. Verifica que Spring Boot este corriendo.`)
+}
+
+async function postJson(path, payload, fallbackMessage) {
   let response
 
   try {
-    response = await fetch(`${API_BASE_URL}/api/validate`, {
+    response = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -12,10 +20,7 @@ export async function validateQuery(payload) {
       body: JSON.stringify(payload)
     })
   } catch (error) {
-    throw new Error(
-      `No se pudo conectar con el backend en ${API_BASE_URL}. Verifica que Spring Boot este corriendo.`,
-      { cause: error }
-    )
+    throw new Error(fallbackMessage, { cause: error })
   }
 
   let data = null
@@ -26,7 +31,7 @@ export async function validateQuery(payload) {
   }
 
   if (!response.ok) {
-    const message = data?.message || 'Ocurrio un error al comunicarse con el backend.'
+    const message = data?.message || fallbackMessage || 'Ocurrio un error al comunicarse con el backend.'
     throw new Error(message, { cause: data || { errors: [{ phase: 'SYSTEM', severity: 'ERROR', message }] } })
   }
 

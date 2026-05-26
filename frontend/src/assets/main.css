@@ -48,6 +48,7 @@ body {
 }
 
 button,
+input,
 select,
 textarea {
   font: inherit;
@@ -96,6 +97,23 @@ textarea {
   margin: 0 auto;
 }
 
+.login-shell {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 64px);
+}
+
+.login-panel {
+  display: grid;
+  gap: 22px;
+  width: min(460px, 100%);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px;
+  box-shadow: 0 18px 40px var(--shadow);
+}
+
 .view-tabs {
   display: flex;
   gap: 8px;
@@ -117,6 +135,10 @@ textarea {
 .view-tabs button.active {
   background: var(--primary);
   color: var(--primary-text);
+}
+
+.view-tabs .logout-tab {
+  margin-left: auto;
 }
 
 .editor-panel,
@@ -235,6 +257,7 @@ h4 {
 }
 
 select,
+input,
 textarea {
   width: 100%;
   border: 1px solid var(--border);
@@ -244,6 +267,11 @@ textarea {
 }
 
 select {
+  height: 44px;
+  padding: 0 12px;
+}
+
+input {
   height: 44px;
   padding: 0 12px;
 }
@@ -261,6 +289,7 @@ textarea::placeholder {
 }
 
 select:focus,
+input:focus,
 textarea:focus {
   border-color: var(--muted);
   outline: 3px solid rgba(182, 149, 192, 0.34);
