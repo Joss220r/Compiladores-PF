@@ -246,8 +246,7 @@ public class BasicSqlParserAdapter implements ParserPort {
         children.add(parseProjectionList(state, errors));
 
         if (state.matchKeyword("FROM")) {
-            SqlToken table = consumeIdentifier(state, "nombre de tabla despues de FROM", errors);
-            children.add(node("FromClause", valueOf(table), tokenAttributes(table), List.of()));
+            children.add(parseFromClause(state, errors));
         } else {
             errors.add("La sentencia SELECT debe incluir FROM.");
         }
@@ -256,6 +255,30 @@ public class BasicSqlParserAdapter implements ParserPort {
         consumeOptionalSemicolon(state);
 
         return node("SelectStatement", "SELECT", Map.of(), children);
+    }
+
+    private AstNode parseFromClause(ParserState state, List<String> errors) {
+        if (state.matchSymbol("(")) {
+            AstNode subquery = parseSubqueryAfterOpeningParenthesis(state, "FROM", errors);
+            List<AstNode> children = new ArrayList<>();
+            children.add(subquery);
+
+            Map<String, Object> attributes = new LinkedHashMap<>();
+            attributes.put("source", "subquery");
+
+            if (!state.isAtEnd() && !state.peek().isClauseBoundary() && !state.checkKeyword("WHERE")) {
+                SqlToken alias = state.advance();
+                attributes.put("alias", alias.lexeme());
+                children.add(tokenNode("Alias", alias));
+            } else {
+                errors.add("La subconsulta en FROM debe tener un alias.");
+            }
+
+            return node("FromClause", "SUBQUERY", attributes, children);
+        }
+
+        SqlToken table = consumeIdentifier(state, "nombre de tabla despues de FROM", errors);
+        return node("FromClause", valueOf(table), tokenAttributes(table), List.of());
     }
 
     private AstNode parseProjectionList(ParserState state, List<String> errors) {
@@ -399,16 +422,11 @@ public class BasicSqlParserAdapter implements ParserPort {
         List<String> connectors = new ArrayList<>();
 
         while (!state.isAtEnd() && !state.checkSymbol(";")) {
-            SqlToken left = consumeValue(state, "operando izquierdo en WHERE", errors);
-            SqlToken operator = consumeOperator(state, errors);
-            SqlToken right = consumeValue(state, "operando derecho en WHERE", errors);
-
-            conditions.add(node(
-                    "Condition",
-                    valueOf(left),
-                    Map.of("operator", valueOf(operator), "right", valueOf(right)),
-                    List.of(tokenNode("LeftOperand", left), tokenNode("Operator", operator), tokenNode("RightOperand", right))
-            ));
+            if (state.checkKeyword("EXISTS")) {
+                conditions.add(parseExistsCondition(state, errors));
+            } else {
+                conditions.add(parseCondition(state, errors));
+            }
 
             if (state.matchKeyword("AND")) {
                 connectors.add("AND");
@@ -424,6 +442,134 @@ public class BasicSqlParserAdapter implements ParserPort {
         }
 
         return node("WhereClause", null, Map.of("connectors", connectors, "count", conditions.size()), conditions);
+    }
+
+    private AstNode parseCondition(ParserState state, List<String> errors) {
+        SqlToken left = consumeValue(state, "operando izquierdo en WHERE", errors);
+
+        if (state.matchKeyword("IN")) {
+            List<AstNode> children = new ArrayList<>();
+            children.add(tokenNode("LeftOperand", left));
+            children.add(node("Operator", "IN", Map.of(), List.of()));
+            children.add(parseInRightOperand(state, errors));
+            return node(
+                    "Condition",
+                    valueOf(left),
+                    Map.of("operator", "IN", "right", "SUBQUERY_OR_LIST"),
+                    children
+            );
+        }
+
+        SqlToken operator = consumeOperator(state, errors);
+        SqlToken right = consumeValue(state, "operando derecho en WHERE", errors);
+
+        return node(
+                "Condition",
+                valueOf(left),
+                Map.of("operator", valueOf(operator), "right", valueOf(right)),
+                List.of(tokenNode("LeftOperand", left), tokenNode("Operator", operator), tokenNode("RightOperand", right))
+        );
+    }
+
+    private AstNode parseExistsCondition(ParserState state, List<String> errors) {
+        SqlToken exists = state.advance();
+        List<AstNode> children = new ArrayList<>();
+        children.add(tokenNode("Operator", exists));
+
+        if (!state.matchSymbol("(")) {
+            errors.add("EXISTS requiere una subconsulta entre parentesis.");
+            return node("ExistsCondition", "EXISTS", Map.of(), children);
+        }
+
+        children.add(parseSubqueryAfterOpeningParenthesis(state, "EXISTS", errors));
+        return node("ExistsCondition", "EXISTS", Map.of("operator", "EXISTS"), children);
+    }
+
+    private AstNode parseInRightOperand(ParserState state, List<String> errors) {
+        if (!state.matchSymbol("(")) {
+            errors.add("IN requiere una subconsulta o lista entre parentesis.");
+            return node("InOperand", null, Map.of("kind", "missing"), List.of());
+        }
+
+        if (state.checkKeyword("SELECT")) {
+            return node("InOperand", null, Map.of("kind", "subquery"),
+                    List.of(parseSubqueryAfterOpeningParenthesis(state, "IN", errors)));
+        }
+
+        List<AstNode> values = new ArrayList<>();
+        while (!state.isAtEnd() && !state.checkSymbol(")")) {
+            if (state.matchSymbol(",")) {
+                continue;
+            }
+            values.add(tokenNode("Value", state.advance()));
+        }
+
+        if (!state.matchSymbol(")")) {
+            errors.add("Se esperaba ')' para cerrar la lista de IN.");
+        }
+        if (values.isEmpty()) {
+            errors.add("IN requiere al menos un valor o una subconsulta.");
+        }
+
+        return node("InOperand", null, Map.of("kind", "list", "count", values.size()), values);
+    }
+
+    private AstNode parseSubqueryAfterOpeningParenthesis(ParserState state, String context, List<String> errors) {
+        SqlToken start = state.isAtEnd() ? SqlToken.missing("subconsulta") : state.peek();
+        List<SqlToken> subqueryTokens = collectUntilMatchingParenthesis(state, context, errors);
+        List<AstNode> children = new ArrayList<>();
+        List<String> nestedErrors = new ArrayList<>();
+
+        if (subqueryTokens.isEmpty()) {
+            errors.add("La subconsulta de " + context + " no puede estar vacia.");
+            return node("Subquery", "", Map.of("context", context), children);
+        }
+
+        ParserState nestedState = new ParserState(subqueryTokens);
+        if (!nestedState.matchKeyword("SELECT")) {
+            errors.add("La subconsulta de " + context + " debe iniciar con SELECT.");
+            return node("Subquery", joinLexemes(subqueryTokens), Map.of("context", context), children);
+        }
+
+        children.add(parseSelect(nestedState, nestedErrors));
+        if (!nestedState.isAtEnd()) {
+            nestedErrors.add("Token inesperado '" + nestedState.peek().lexeme() + "' dentro de la subconsulta.");
+        }
+        errors.addAll(nestedErrors);
+
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("context", context);
+        attributes.put("line", start.line());
+        attributes.put("column", start.column());
+        attributes.put("errors", List.copyOf(nestedErrors));
+
+        return node("Subquery", joinLexemes(subqueryTokens), attributes, children);
+    }
+
+    private List<SqlToken> collectUntilMatchingParenthesis(ParserState state, String context, List<String> errors) {
+        List<SqlToken> collected = new ArrayList<>();
+        int depth = 1;
+
+        while (!state.isAtEnd()) {
+            SqlToken token = state.advance();
+            if (token.isSymbol("(")) {
+                depth++;
+                collected.add(token);
+                continue;
+            }
+            if (token.isSymbol(")")) {
+                depth--;
+                if (depth == 0) {
+                    return collected;
+                }
+                collected.add(token);
+                continue;
+            }
+            collected.add(token);
+        }
+
+        errors.add("Falta cerrar la subconsulta de " + context + " con ')'.");
+        return collected;
     }
 
     private AstNode parseDelimitedList(
@@ -597,6 +743,25 @@ public class BasicSqlParserAdapter implements ParserPort {
         return token == null ? null : token.lexeme();
     }
 
+    private static String joinLexemes(List<SqlToken> tokens) {
+        StringBuilder joined = new StringBuilder();
+        for (SqlToken token : tokens) {
+            if (!joined.isEmpty() && !Set.of(",", ")", ";").contains(token.lexeme())
+                    && !"(".equals(previousLexeme(joined))) {
+                joined.append(' ');
+            }
+            joined.append(token.lexeme());
+        }
+        return joined.toString();
+    }
+
+    private static String previousLexeme(StringBuilder joined) {
+        if (joined.isEmpty()) {
+            return "";
+        }
+        return String.valueOf(joined.charAt(joined.length() - 1));
+    }
+
     private static Map<String, Object> tokenAttributes(SqlToken token) {
         if (token == null) {
             return Map.of();
@@ -711,7 +876,8 @@ public class BasicSqlParserAdapter implements ParserPort {
 
     private static boolean isKeyword(String lexeme) {
         return List.of(
-                "SELECT", "INSERT", "INTO", "UPDATE", "DELETE", "FROM", "WHERE", "SET", "VALUES", "AND", "OR"
+                "SELECT", "INSERT", "INTO", "UPDATE", "DELETE", "FROM", "WHERE", "SET", "VALUES", "AND", "OR",
+                "IN", "EXISTS"
         ).contains(lexeme);
     }
 
@@ -750,6 +916,8 @@ public class BasicSqlParserAdapter implements ParserPort {
                     || isSymbol(")")
                     || isSymbol(",")
                     || isKeyword("WHERE")
+                    || isKeyword("AND")
+                    || isKeyword("OR")
                     || isKeyword("FROM")
                     || isKeyword("SET")
                     || isKeyword("VALUES");

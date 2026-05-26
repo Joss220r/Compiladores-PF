@@ -1092,4 +1092,79 @@ class QueryValidationControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errors[0].message").value("Esta consulta parece SQL, pero el motor seleccionado es MongoDB."));
     }
+
+    @Test
+    void sqlAcceptsWhereInNestedSelect() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre FROM usuarios WHERE id IN (SELECT id FROM usuarios);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsWhereExistsNestedSelect() throws Exception {
+        String request = """
+                {
+                  "engine": "POSTGRESQL",
+                  "query": "SELECT nombre FROM usuarios WHERE EXISTS (SELECT id FROM usuarios WHERE edad > 18);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlAcceptsFromNestedSelectWithAlias() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre FROM (SELECT nombre FROM usuarios) u;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.errors", hasSize(0)));
+    }
+
+    @Test
+    void sqlRejectsNestedSelectWithoutFrom() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre FROM usuarios WHERE id IN (SELECT id);"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message").value("La sentencia SELECT debe incluir FROM."));
+    }
+
+    @Test
+    void sqlRejectsUnclosedNestedSelect() throws Exception {
+        String request = """
+                {
+                  "engine": "MYSQL",
+                  "query": "SELECT nombre FROM usuarios WHERE id IN (SELECT id FROM usuarios;"
+                }
+                """;
+
+        mockMvc.perform(post("/api/validate").contentType(MediaType.APPLICATION_JSON).content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errors[0].message", containsString("Falta cerrar")));
+    }
 }

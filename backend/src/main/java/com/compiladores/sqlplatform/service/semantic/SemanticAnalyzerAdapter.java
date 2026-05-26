@@ -85,7 +85,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         if ("SELECT".equals(query.operation().get())) {
-            validateSelect(query, engine, errors, warnings, symbols);
+            validateSelect(query, ast, engine, errors, warnings, symbols);
         } else if (engine == DatabaseEngine.MONGODB) {
             validateMongo(ast, errors, warnings, symbols);
         } else if (engine == DatabaseEngine.REDIS) {
@@ -141,6 +141,7 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
 
     private void validateSelect(
             QueryShape query,
+            AstNode ast,
             DatabaseEngine engine,
             List<String> errors,
             List<String> warnings,
@@ -151,6 +152,13 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         if (query.tableName().isEmpty()) {
+            List<String> nestedTables = collectSqlFromTables(ast);
+            if (!nestedTables.isEmpty() || query.rawQuery().matches("(?is).*\\bFROM\\s*\\(\\s*SELECT\\b.*")) {
+                validateCollectedTables(nestedTables, engine, errors, symbols);
+                symbols.put("fromSubquery", true);
+                return;
+            }
+
             warnings.add("No se pudo identificar la tabla desde el AST actual.");
             return;
         }
@@ -174,6 +182,49 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
         }
 
         query.where().ifPresent(where -> validateWhere(where, table.get(), tableName, errors, symbols));
+        validateCollectedTables(collectSqlFromTables(ast), engine, errors, symbols);
+    }
+
+    private List<String> collectSqlFromTables(AstNode ast) {
+        List<String> tables = new ArrayList<>();
+        collectSqlFromTables(ast, tables);
+        return tables.stream().distinct().toList();
+    }
+
+    private void collectSqlFromTables(AstNode node, List<String> tables) {
+        if (node == null) {
+            return;
+        }
+
+        if ("FromClause".equals(node.getType())
+                && node.getValue() != null
+                && !"SUBQUERY".equals(node.getValue())) {
+            tables.add(node.getValue());
+        }
+
+        if (node.getChildren() == null) {
+            return;
+        }
+
+        node.getChildren().forEach(child -> collectSqlFromTables(child, tables));
+    }
+
+    private void validateCollectedTables(
+            List<String> tables,
+            DatabaseEngine engine,
+            List<String> errors,
+            Map<String, Object> symbols
+    ) {
+        if (tables.isEmpty()) {
+            return;
+        }
+
+        symbols.put("referencedTables", tables);
+        for (String tableName : tables) {
+            if (catalogService.findTable(engine, tableName).isEmpty()) {
+                errors.add("La tabla '" + tableName + "' no existe en el catalogo para " + engine.name() + ".");
+            }
+        }
     }
 
     private void validateMongo(AstNode ast, List<String> errors, List<String> warnings, Map<String, Object> symbols) {
@@ -564,6 +615,16 @@ public class SemanticAnalyzerAdapter implements SemanticAnalyzerPort {
             List<String> columnsFromAttributes = attributeStringList(ast, "columns");
 
             if ("SELECT".equals(operation)) {
+                if (normalized.matches("(?is)^\\s*SELECT\\s+.+?\\s+FROM\\s*\\(\\s*SELECT\\b.*")) {
+                    return new QueryShape(
+                            Optional.of(operation),
+                            normalized,
+                            tableFromAttributes,
+                            columnsFromAttributes,
+                            Optional.empty()
+                    );
+                }
+
                 Matcher select = SELECT_PATTERN.matcher(normalized);
                 if (select.matches()) {
                     String rawColumns = select.group("columns");
