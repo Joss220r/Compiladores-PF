@@ -233,12 +233,12 @@ function shortQuery(value) {
         <form class="query-form" @submit.prevent="submitLogin">
           <label class="field">
             <span>Usuario</span>
-            <input v-model="loginUsername" type="text" autocomplete="username" placeholder="admin" />
+            <input v-model="loginUsername" type="text" autocomplete="username" placeholder="Ingresa tu usuario" />
           </label>
 
           <label class="field">
-            <span>Contrasena</span>
-            <input v-model="loginPassword" type="password" autocomplete="current-password" placeholder="admin123" />
+            <span>Contraseña</span>
+            <input v-model="loginPassword" type="password" autocomplete="current-password" placeholder="Ingresa tu contraseña" />
           </label>
 
           <div v-if="loginError" class="error-box">
